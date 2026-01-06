@@ -8,7 +8,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 async def test_cover_letter():
-    from linkedin_auto_apply import LinkedInAutoApply, JobListing
+    import sys
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    from src.linkedin_auto_apply import LinkedInAutoApply, JobListing
     
     test_resume = Path('./data/resumes/test_resume.txt')
     

@@ -722,13 +722,30 @@
                 
                 <!-- Tabs -->
                 <div class="tabs">
-                    <button class="tab active" data-tab="basic">🔍 Basic</button>
+                    <button class="tab active" data-tab="linkedin">🔐 LinkedIn</button>
+                    <button class="tab" data-tab="basic">🔍 Basic</button>
                     <button class="tab" data-tab="details">💼 Details</button>
                     <button class="tab" data-tab="advanced">🎯 Advanced</button>
                 </div>
 
+                <!-- Tab 0: LinkedIn Credentials ⭐ NEW -->
+                <div class="tab-content active" id="linkedin">
+                    <div class="form-group">
+                        <label>LinkedIn Email</label>
+                        <input type="email" id="linkedinEmail" placeholder="your-email@example.com" required>
+                    </div>
+                    <div class="form-group">
+                        <label>LinkedIn Password</label>
+                        <input type="password" id="linkedinPassword" placeholder="Your LinkedIn password" required>
+                    </div>
+                    <p style="font-size: 12px; color: #666; margin-top: 10px;">
+                        🔒 Your credentials are sent securely and only used for this session.
+                        They are NOT saved to disk.
+                    </p>
+                </div>
+
                 <!-- Tab 1: Basic -->
-                <div class="tab-content active" id="basic">
+                <div class="tab-content" id="basic">
                     <div class="form-group">
                         <label>Job Role/Keyword</label>
                         <input type="text" id="keyword" value="AI Engineer" placeholder="e.g., AI Engineer, Data Scientist">
@@ -791,10 +808,23 @@
                 <div class="tab-content" id="advanced">
                     <div class="slider-container">
                         <div class="slider-label">
-                            <span>Max Jobs to Apply</span>
+                            <span>Max Jobs to Collect & Analyze</span>
                             <span class="slider-value" id="maxJobsValue">15</span>
                         </div>
                         <input type="range" id="maxJobs" min="1" max="50" value="15">
+                        <p style="font-size: 12px; color: #666; margin-top: 5px;">
+                            💡 How many jobs to search and analyze with AI
+                        </p>
+                    </div>
+                    <div class="slider-container">
+                        <div class="slider-label">
+                            <span>🎯 Max Applications to Submit</span>
+                            <span class="slider-value" id="maxApplicationsValue">5</span>
+                        </div>
+                        <input type="range" id="maxApplications" min="1" max="20" value="5">
+                        <p style="font-size: 12px; color: #666; margin-top: 5px;">
+                            🚀 How many jobs to actually apply to (Easy Apply only)
+                        </p>
                     </div>
                     <div class="slider-container">
                         <div class="slider-label">
@@ -802,10 +832,13 @@
                             <span class="slider-value" id="thresholdValue">0.6</span>
                         </div>
                         <input type="range" id="threshold" min="0" max="1" step="0.1" value="0.6">
+                        <p style="font-size: 12px; color: #666; margin-top: 5px;">
+                            📊 Minimum match score (60% means 60% or higher match)
+                        </p>
                     </div>
                     <div class="checkbox-group">
                         <input type="checkbox" id="autoApply" checked>
-                        <label for="autoApply">Auto Apply to Matched Jobs</label>
+                        <label for="autoApply">✅ Auto Apply to Matched Jobs (Easy Apply Filter Enabled)</label>
                     </div>
                 </div>
             </div>
@@ -933,6 +966,10 @@
             document.getElementById('maxJobsValue').textContent = e.target.value;
         });
 
+        document.getElementById('maxApplications').addEventListener('input', (e) => {
+            document.getElementById('maxApplicationsValue').textContent = e.target.value;
+        });
+
         document.getElementById('threshold').addEventListener('input', (e) => {
             document.getElementById('thresholdValue').textContent = e.target.value;
         });
@@ -993,6 +1030,15 @@
                 return;
             }
 
+            // Validate LinkedIn credentials
+            const linkedinEmail = document.getElementById('linkedinEmail').value;
+            const linkedinPassword = document.getElementById('linkedinPassword').value;
+            
+            if (!linkedinEmail || !linkedinPassword) {
+                alert('⚠️ Please enter your LinkedIn credentials in the LinkedIn tab!');
+                return;
+            }
+
             const runButton = document.getElementById('runButton');
             const progressSection = document.getElementById('progressSection');
             const resultsSection = document.getElementById('resultsSection');
@@ -1008,6 +1054,8 @@
             // Prepare form data
             const formData = new FormData();
             formData.append('file', uploadedFile);
+            formData.append('linkedin_email', linkedinEmail);  // ⭐ NEW
+            formData.append('linkedin_password', linkedinPassword);  // ⭐ NEW
             formData.append('keyword', document.getElementById('keyword').value);
             formData.append('location', document.getElementById('location').value);
             formData.append('skills', document.getElementById('skills').value);
@@ -1015,6 +1063,7 @@
             formData.append('job_type', document.getElementById('jobType').value);
             formData.append('salary_range', document.getElementById('salary').value);
             formData.append('max_jobs', document.getElementById('maxJobs').value);
+            formData.append('max_applications', document.getElementById('maxApplications').value);
             formData.append('similarity_threshold', document.getElementById('threshold').value);
             formData.append('auto_apply', document.getElementById('autoApply').checked);
 
@@ -1023,7 +1072,7 @@
                 updateProgress(10);
 
                 // Call API
-                const response = await fetch('http://127.0.0.1:50501/api/run-agent', {
+                const response = await fetch('http://localhost:8000/api/run-agent', {
                     method: 'POST',
                     body: formData
                 });

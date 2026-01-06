@@ -26,7 +26,8 @@ class LinkedInAutomationAgent:
         password: str,
         resume_text: str,
         resume_file_path: Optional[str] = None,
-        gemini_client: Optional[Any] = None
+        gemini_client: Optional[Any] = None,
+        max_applications: int = 5
     ):
         self.email = email
         self.password = password
@@ -44,10 +45,15 @@ class LinkedInAutomationAgent:
         self.top_jobs: List[Dict] = []
         self.application_results: List[Dict] = []
         
-        # Configuration
-        self.max_applications = 5
+        # Configuration - User can now specify max applications
+        self.max_applications = max_applications
         self.similarity_threshold = 60
         self.confidence_threshold = 0.7
+        
+        logger.info(f"🎯 Automation configured:")
+        logger.info(f"   📊 Max applications: {self.max_applications}")
+        logger.info(f"   📈 Similarity threshold: {self.similarity_threshold}%")
+        logger.info(f"   🎲 Confidence threshold: {self.confidence_threshold}")
         
     async def human_delay(self, min_seconds: float = 1.0, max_seconds: float = 3.0):
         """Add random human-like delay."""
@@ -103,35 +109,134 @@ class LinkedInAutomationAgent:
         logger.info("🔐 Phase 1.2: Authenticating with LinkedIn")
         
         try:
-            # Navigate to LinkedIn login
-            await self.page.goto('https://www.linkedin.com/login')
-            await self.page.wait_for_load_state('networkidle')
-            
-            # Enter email
-            await self.page.fill('input[name="session_key"]', self.email)
-            await self.human_delay(2, 4)
-            
-            # Enter password
-            await self.page.fill('input[name="session_password"]', self.password)
-            await self.human_delay(1, 3)
-            
-            # Click sign in
-            await self.page.click('button[type="submit"]')
-            await self.page.wait_for_load_state('networkidle')
-            
-            # Verify successful login
-            await self.human_delay(3, 5)
-            
-            # Check for various success indicators
-            if await self.page.locator('nav.global-nav').count() > 0:
-                logger.info("✅ Successfully logged into LinkedIn")
-                return True
-            else:
-                logger.error("❌ Login failed - navigation bar not found")
+            if not self.page:
+                logger.error("❌ Page not initialized")
                 return False
                 
+            # Navigate to LinkedIn login
+            logger.info("📍 Navigating to LinkedIn login page...")
+            await self.page.goto('https://www.linkedin.com/login', wait_until='domcontentloaded')
+            await self.human_delay(2, 3)
+            
+            # Wait for login form to be visible
+            logger.info("⏳ Waiting for login form...")
+            await self.page.wait_for_selector('input[name="session_key"]', state='visible', timeout=10000)
+            await self.page.wait_for_selector('input[name="session_password"]', state='visible', timeout=10000)
+            
+            # Take screenshot before login
+            await self.page.screenshot(path='screenshots/01_login_page.png')
+            logger.info("📸 Screenshot saved: login page")
+            
+            # Clear any existing values and enter email
+            logger.info(f"✍️ Entering email: {self.email[:3]}***")
+            email_input = self.page.locator('input[name="session_key"]')
+            await email_input.click()
+            await email_input.clear()
+            await self.human_delay(0.5, 1)
+            await email_input.type(self.email, delay=100)  # Type slowly like human
+            await self.human_delay(1, 2)
+            
+            # Clear any existing values and enter password
+            logger.info("✍️ Entering password...")
+            password_input = self.page.locator('input[name="session_password"]')
+            await password_input.click()
+            await password_input.clear()
+            await self.human_delay(0.5, 1)
+            await password_input.type(self.password, delay=120)  # Type slowly
+            await self.human_delay(1, 2)
+            
+            # Take screenshot after filling
+            await self.page.screenshot(path='screenshots/02_credentials_filled.png')
+            logger.info("📸 Screenshot saved: credentials filled")
+            
+            # Find and click sign in button
+            logger.info("🖱️ Clicking sign in button...")
+            submit_button = self.page.locator('button[type="submit"]')
+            await submit_button.click()
+            
+            # Wait for navigation
+            logger.info("⏳ Waiting for login to complete...")
+            await self.human_delay(3, 5)
+            
+            # Check for security checkpoint
+            if 'checkpoint/challenge' in self.page.url:
+                logger.warning("⚠️ LinkedIn security checkpoint detected. Please complete it manually in the browser.")
+                await self.page.screenshot(path='screenshots/03_security_checkpoint.png')
+                # Wait for user to complete checkpoint (up to 2 minutes)
+                logger.info("⏳ Waiting up to 120 seconds for security checkpoint completion...")
+                for i in range(24):  # 24 * 5 = 120 seconds
+                    await self.human_delay(5, 5)
+                    if 'checkpoint/challenge' not in self.page.url:
+                        logger.info("✅ Security checkpoint completed!")
+                        break
+                    if i % 4 == 0:  # Log every 20 seconds
+                        logger.info(f"⏳ Still waiting... ({(i+1)*5} seconds elapsed)")
+            
+            # Check for CAPTCHA or verification
+            if await self.page.locator('text=Let\'s do a quick security check').count() > 0:
+                logger.warning("⚠️ CAPTCHA detected! Please solve it manually...")
+                await self.page.screenshot(path='screenshots/03_captcha.png')
+                # Wait for user to solve CAPTCHA
+                await self.human_delay(30, 45)
+            
+            # Check for email verification
+            if await self.page.locator('text=We sent a verification code').count() > 0:
+                logger.warning("⚠️ Email verification required! Please check your email...")
+                await self.page.screenshot(path='screenshots/03_email_verification.png')
+                # Wait for user to verify
+                await self.human_delay(30, 45)
+            
+            # Wait for page to load after login
+            # Note: LinkedIn feed has continuous network activity, so we check URL first
+            await self.human_delay(2, 3)
+            
+            # Check URL immediately - if we're on feed, login succeeded
+            current_url = self.page.url
+            logger.info(f"📍 Current URL after login: {current_url}")
+            
+            if 'feed' in current_url or 'mynetwork' in current_url or 'check/add-phone' in current_url:
+                logger.info("✅ Successfully logged into LinkedIn (verified by URL)")
+                await self.page.screenshot(path='screenshots/04_after_login.png')
+                logger.info("📸 Screenshot saved: after login")
+                return True
+            
+            # If not on feed yet, wait for navigation with longer timeout
+            try:
+                await self.page.wait_for_url(lambda url: 'feed' in url or 'mynetwork' in url or 'check/add-phone' in url, timeout=10000)
+                logger.info("✅ Successfully logged into LinkedIn")
+                await self.page.screenshot(path='screenshots/04_after_login.png')
+                logger.info("📸 Screenshot saved: after login")
+                return True
+            except Exception as e:
+                logger.warning(f"URL wait timeout, checking selectors: {e}")
+            
+            # Fallback: Check for success indicators
+            await self.page.screenshot(path='screenshots/04_after_login.png')
+            logger.info("📸 Screenshot saved: after login")
+            
+            success_selectors = [
+                'nav.global-nav',
+                'a[href*="/feed/"]',
+                'div[data-control-name="nav.all_nav"]',
+                'button[aria-label="Start a post"]',
+                'img[alt*="Photo"]'  # Profile picture
+            ]
+            
+            for selector in success_selectors:
+                if await self.page.locator(selector).count() > 0:
+                    logger.info(f"✅ Successfully logged into LinkedIn (found: {selector})")
+                    return True
+            
+            logger.error("❌ Login failed - navigation bar not found")
+            logger.error(f"Current URL: {current_url}")
+            await self.page.screenshot(path='screenshots/05_login_failed.png')
+            return False
+                
         except Exception as e:
-            logger.error(f"❌ Login error: {e}")
+            logger.error(f"❌ Login error: {e}", exc_info=True)
+            if self.page:
+                await self.page.screenshot(path='screenshots/error_login.png')
+                logger.error(f"Current URL: {self.page.url}")
             return False
     
     # ==================== PHASE 2: JOB SEARCH & FILTERING ====================
@@ -140,6 +245,9 @@ class LinkedInAutomationAgent:
         """Step 2.1: Navigate to Jobs Section"""
         logger.info("📋 Phase 2.1: Navigating to Jobs section")
         
+        if not self.page:
+            raise RuntimeError("Page not initialized")
+            
         await self.page.click('a[href*="/jobs"]')
         await self.page.wait_for_url('**/jobs/**')
         await self.human_delay(2, 3)
@@ -148,6 +256,9 @@ class LinkedInAutomationAgent:
     async def search_jobs(self, keywords: str, location: str):
         """Step 2.2 & 2.3: Configure Search Parameters"""
         logger.info(f"🔍 Phase 2.2-2.3: Searching for '{keywords}' in '{location}'")
+        
+        if not self.page:
+            raise RuntimeError("Page not initialized")
         
         # Enter keywords
         keyword_input = self.page.locator('input[aria-label*="Search by title"]').first
@@ -169,20 +280,73 @@ class LinkedInAutomationAgent:
         logger.info("✅ Search parameters configured")
     
     async def apply_easy_apply_filter(self):
-        """Step 2.4: Apply Easy Apply Filter"""
+        """Step 2.4: Apply Easy Apply Filter - CRITICAL FOR AUTOMATION"""
         logger.info("🎯 Phase 2.4: Applying Easy Apply filter (CRITICAL)")
         
+        if not self.page:
+            raise RuntimeError("Page not initialized")
+        
         try:
-            # Click Easy Apply filter button
-            easy_apply_button = self.page.locator('button:has-text("Easy Apply")').first
-            await easy_apply_button.click()
-            await self.page.wait_for_load_state('networkidle')
+            # Method 1: Try clicking the Easy Apply filter button
+            logger.info("   🔍 Looking for Easy Apply filter button...")
+            
+            # Wait for filters to load
+            await self.page.wait_for_load_state('domcontentloaded')
             await self.human_delay(2, 3)
             
-            logger.info("✅ Easy Apply filter activated")
-            return True
+            # Multiple selectors for Easy Apply button (LinkedIn changes them frequently)
+            easy_apply_selectors = [
+                'button:has-text("Easy Apply")',
+                'button[aria-label*="Easy Apply"]',
+                'button:has-text("Easy")',
+                'label:has-text("Easy Apply")',
+                'button.search-reusables__filter-pill-button:has-text("Easy Apply")'
+            ]
+            
+            filter_applied = False
+            
+            for selector in easy_apply_selectors:
+                if await self.page.locator(selector).count() > 0:
+                    logger.info(f"   ✅ Found Easy Apply filter: {selector}")
+                    await self.page.locator(selector).first.click()
+                    await self.page.wait_for_load_state('networkidle')
+                    await self.human_delay(2, 3)
+                    filter_applied = True
+                    break
+            
+            # Method 2: Try URL parameter approach (more reliable)
+            if not filter_applied:
+                logger.info("   🔄 Trying URL parameter approach...")
+                current_url = self.page.url
+                
+                if '?' in current_url:
+                    new_url = f"{current_url}&f_AL=true"
+                else:
+                    new_url = f"{current_url}?f_AL=true"
+                
+                await self.page.goto(new_url)
+                await self.page.wait_for_load_state('networkidle')
+                await self.human_delay(2, 3)
+                filter_applied = True
+                logger.info("   ✅ Applied Easy Apply via URL parameter")
+            
+            # Verify filter is applied
+            if filter_applied:
+                # Check if Easy Apply badge/indicator is visible
+                current_url = self.page.url
+                if 'f_AL=true' in current_url:
+                    logger.info("   ✅ Easy Apply filter VERIFIED (URL contains f_AL=true)")
+                    logger.info("   🎯 Only Easy Apply jobs will be collected")
+                    return True
+                else:
+                    logger.warning("   ⚠️ Easy Apply filter may not be active")
+            
+            logger.warning("   ⚠️ Could not verify Easy Apply filter")
+            return filter_applied
+            
         except Exception as e:
-            logger.error(f"❌ Failed to apply Easy Apply filter: {e}")
+            logger.error(f"   ❌ Failed to apply Easy Apply filter: {e}")
+            logger.error(f"   📝 Will attempt to proceed, but jobs may not all be Easy Apply")
             return False
     
     async def apply_additional_filters(self, filters: Dict[str, Any]):
@@ -198,6 +362,9 @@ class LinkedInAutomationAgent:
     async def collect_job_listings(self, target_count: int = 30) -> List[Dict]:
         """Step 3.1: Collect Job Listings"""
         logger.info(f"📊 Phase 3.1: Collecting up to {target_count} job listings")
+        
+        if not self.page:
+            raise RuntimeError("Page not initialized")
         
         jobs = []
         
@@ -238,6 +405,9 @@ class LinkedInAutomationAgent:
     
     async def analyze_job_with_ai(self, job: Dict) -> Dict:
         """Step 3.2: Score Jobs Against Resume using Gemini AI"""
+        
+        if not self.page:
+            raise RuntimeError("Page not initialized")
         
         # Click on job to get full description
         await job['element'].click()
@@ -358,6 +528,9 @@ RETURN AS JSON:
         """Step 4.1-4.8: Complete application process for a single job"""
         logger.info(f"📝 Phase 4: Applying to {job['title']} at {job['company']}")
         
+        if not self.page:
+            raise RuntimeError("Page not initialized")
+        
         result = {
             'job': job,
             'status': 'PENDING',
@@ -424,6 +597,9 @@ RETURN AS JSON:
     async def fill_application_page(self):
         """Step 4.3-4.5: Fill current application page"""
         
+        if not self.page:
+            raise RuntimeError("Page not initialized")
+        
         # Find all input fields on current page
         inputs = await self.page.locator('input:visible').all()
         textareas = await self.page.locator('textarea:visible').all()
@@ -459,6 +635,9 @@ RETURN AS JSON:
     async def get_field_label(self, element) -> str:
         """Get the label text for a form field"""
         try:
+            if not self.page:
+                return ""
+                
             label = await element.get_attribute('aria-label')
             if label:
                 return label
@@ -466,7 +645,7 @@ RETURN AS JSON:
             # Try to find associated label
             field_id = await element.get_attribute('id')
             if field_id:
-                label_element = await self.page.locator(f'label[for="{field_id}"]').first
+                label_element = self.page.locator(f'label[for="{field_id}"]').first
                 if label_element:
                     return await label_element.inner_text()
         except:
@@ -537,6 +716,9 @@ Return only the cover letter text, no additional commentary.
             'Successfully applied',
             'Application sent'
         ]
+        
+        if not self.page:
+            return False
         
         page_text = await self.page.inner_text('body')
         

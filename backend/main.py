@@ -3,7 +3,9 @@ Main FastAPI application entry point.
 Initializes the application, middleware, and routes.
 """
 from typing import Optional, Dict, Any
-from fastapi import FastAPI, BackgroundTasks
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from contextlib import asynccontextmanager
@@ -11,6 +13,9 @@ import uvicorn
 
 from backend.config import settings
 from backend.routes.api_routes import router as api_router
+from backend.routes.linkedin_jobs_routes import router as linkedin_jobs_router
+from backend.routes.agent_routes import router as agent_router
+from backend.database.connection import init_db
 # from backend.utils.logger import setup_logger
 
 # Setup logger
@@ -27,7 +32,10 @@ async def lifespan(app: FastAPI):
     print(f"📝 Environment: {settings.APP_ENV}")
     print(f"🔧 Debug mode: {settings.DEBUG}")
     
-    # TODO: Initialize database connection
+    # Initialize database
+    init_db()
+    print("✓ Database initialized")
+    
     # TODO: Initialize vector store
     # TODO: Start background scheduler
     
@@ -50,6 +58,26 @@ app = FastAPI(
     debug=settings.DEBUG,
 )
 
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Return a frontend-friendly error payload for 422 validation errors."""
+    errors = []
+    for e in exc.errors():
+        loc = e.get("loc", [])
+        field = ".".join(str(p) for p in loc if p not in ("body", "query", "path")) or ".".join(str(p) for p in loc)
+        msg = e.get("msg", "Invalid request")
+        errors.append(f"{field}: {msg}" if field else msg)
+
+    return JSONResponse(
+        status_code=422,
+        content={
+            "message": "Request validation failed",
+            "errors": errors,
+            "detail": exc.errors(),
+        },
+    )
+
 # CORS Middleware
 app.add_middleware(
     CORSMiddleware,
@@ -64,6 +92,8 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 # Include routers
 app.include_router(api_router)
+app.include_router(linkedin_jobs_router)
+app.include_router(agent_router)
 
 
 # Health check endpoint
@@ -88,32 +118,13 @@ async def health_check():
     }
 
 
-# Simple API to run the automation agent (mocked for local dev)
-@app.post("/api/run-agent")
-async def run_agent(background_tasks: BackgroundTasks, payload: Optional[Dict[str, Any]] = None):
-    """Trigger the agent orchestrator to search and apply for jobs.
+"""NOTE: API endpoints are defined in routers under `backend/routes/`.
 
-    Accepts a JSON payload with search criteria. Example:
-      {"keywords": "AI Engineer", "location": "Remote", "linkedin_email": "...", "linkedin_password": "...", "submit": false}
-    """
-    from backend.agents.orchestrator import AgentOrchestrator
-
-    data = payload or {}
-    orchestrator = AgentOrchestrator()
-
-    async def _run_task(criteria: dict):
-        await orchestrator.execute_job_search_workflow(user_id="local_user", search_criteria=criteria)
-
-    background_tasks.add_task(_run_task, data)
-    return {"status": "started", "message": "Agent started in background"}
-
-
-@app.get("/api/agent/status")
-async def agent_status():
-    """Return status of last agent run."""
-    from backend.agents.state import get_status
-
-    return get_status()
+Historically this file also defined `/api/run-agent` and `/api/agent/status` directly.
+Those duplicates caused contract confusion (JSON vs multipart) and route precedence
+issues. The canonical endpoints live in `backend.routes.api_routes` (mounted above)
+and in `backend.api.autoagenthire` via `register_autoagenthire_routes(app)`.
+"""
 
 
 # Include AutoAgentHire routes

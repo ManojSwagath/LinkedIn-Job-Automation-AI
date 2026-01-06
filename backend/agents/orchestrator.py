@@ -42,74 +42,124 @@ class AgentOrchestrator:
         Returns:
             Workflow execution results
         """
-        # Realistic (but minimal) implementation using LinkedInBot
-        from backend.agents.linkedin_bot import LinkedInBot
+        # Use the comprehensive AutoAgentHireBot for full automation
+        from backend.agents.autoagenthire_bot import AutoAgentHireBot
         from backend.agents.state import set_status
         from backend.config import settings
         import os
 
         set_status("running", {"phase": "starting"})
 
-        # Use credentials from search_criteria, fall back to .env file
+        # Use credentials from search_criteria
         linkedin_email = search_criteria.get("linkedin_email") or settings.LINKEDIN_EMAIL or os.getenv("LINKEDIN_EMAIL", "")
         linkedin_password = search_criteria.get("linkedin_password") or settings.LINKEDIN_PASSWORD or os.getenv("LINKEDIN_PASSWORD", "")
-        
-        # Get headless setting from environment (default False to show browser)
-        headless_mode = os.getenv("HEADLESS_MODE", "false").lower() in ["true", "1", "yes"]
         
         if not linkedin_email or not linkedin_password:
             set_status("failed", {"reason": "missing_credentials", "message": "LinkedIn credentials not provided"})
             return {"status": "failed", "reason": "missing_credentials", "message": "Please provide LinkedIn credentials"}
 
-        bot = LinkedInBot(
-            email=linkedin_email,
-            password=linkedin_password,
-            headless=headless_mode,  # Show browser by default
-        )
+        # Prepare configuration for AutoAgentHireBot
+        keywords = search_criteria.get("keywords", "") or search_criteria.get("keyword", "") or os.getenv("JOB_KEYWORDS", "Python Developer")
+        location = search_criteria.get("location", "") or os.getenv("JOB_LOCATION", "Remote")
+        resume_path = search_criteria.get("resume_path", "")
+        auto_apply = search_criteria.get("auto_apply", False) or search_criteria.get("submit", False)
+        max_jobs = search_criteria.get("max_jobs", 5)
+        max_applications = search_criteria.get("max_applications", 5)
+        similarity_threshold = search_criteria.get("similarity_threshold", 0.6)
+        
+        bot_config = {
+            "linkedin_email": linkedin_email,
+            "linkedin_password": linkedin_password,
+            "keyword": keywords,
+            "location": location,
+            "resume_path": resume_path,
+            "auto_apply": auto_apply,
+            "max_jobs": max_applications,  # How many to apply to
+            "max_results": max_jobs,  # How many to search
+            "similarity_threshold": similarity_threshold
+        }
+        
+        # Set credentials in environment for bot to use
+        os.environ["LINKEDIN_EMAIL"] = linkedin_email
+        os.environ["LINKEDIN_PASSWORD"] = linkedin_password
+        
+        # Set user profile information from search_criteria or fallback to .env
+        os.environ["FIRST_NAME"] = search_criteria.get("first_name") or os.getenv("FIRST_NAME", "")
+        os.environ["LAST_NAME"] = search_criteria.get("last_name") or os.getenv("LAST_NAME", "")
+        os.environ["PHONE_NUMBER"] = search_criteria.get("phone_number") or os.getenv("PHONE_NUMBER", "")
+        os.environ["LINKEDIN_URL"] = search_criteria.get("linkedin_url") or os.getenv("LINKEDIN_URL", "")
+        os.environ["PORTFOLIO_URL"] = search_criteria.get("portfolio_url") or os.getenv("PORTFOLIO_URL", "")
+        os.environ["CITY"] = search_criteria.get("city") or os.getenv("CITY", "")
+        os.environ["STATE"] = search_criteria.get("state") or os.getenv("STATE", "")
+        os.environ["COUNTRY"] = search_criteria.get("country") or os.getenv("COUNTRY", "")
+
+        bot = AutoAgentHireBot(config=bot_config)
 
         try:
-            set_status("running", {"phase": "login", "message": f"Logging in as {linkedin_email}"})
-            ok = await bot.login()
-            if not ok:
-                set_status("failed", {"reason": "login_failed", "message": "Could not log into LinkedIn. Check credentials or CAPTCHA."})
-                return {"status": "failed", "reason": "login_failed", "message": "Login failed - check credentials"}
-
-            keywords = search_criteria.get("keywords", "") or os.getenv("JOB_KEYWORDS", "Python Developer")
-            location = search_criteria.get("location", "") or os.getenv("JOB_LOCATION", "Remote")
+            set_status("running", {"phase": "initializing", "message": f"Starting automation for {linkedin_email}"})
             
-            set_status("running", {"phase": "searching", "message": f"Searching for: {keywords} in {location}"})
-            jobs = await bot.search_jobs(keywords, location)
+            # Run the full automation workflow
+            result = await bot.run_automation()
             
-            set_status("running", {"phase": "found_jobs", "jobs_count": len(jobs), "message": f"Found {len(jobs)} jobs"})
+            # Update status with results
+            jobs_found = result.get("jobs_found", 0)
+            applications_successful = result.get("applications_successful", 0)
+            applications_attempted = result.get("applications_attempted", 0)
+            
+            set_status("running", {"phase": "completed", "jobs_found": jobs_found, "applications": applications_successful})
 
-            submit = bool(search_criteria.get("submit", False))
-            set_status("running", {"phase": "applying", "jobs": len(jobs), "submit": submit})
-            results = []
-            for job in jobs:
-                url = job.get("url") or job.get("link")
-                if not url:
-                    continue
-                if not submit:
-                    preview = await bot.prepare_application(url)
-                    results.append({"url": url, "preview": preview})
-                else:
-                    res = await bot.submit_application(url)
-                    results.append(res)
-
-            # Persist previews or results
+            # Persist results
             try:
                 from backend.agents.storage import save_application_result
-                for r in results:
-                    save_application_result({"user_id": user_id, "result": r})
-            except Exception:
-                pass
+                from datetime import datetime
+                
+                for job in result.get("jobs", []):
+                    if job.get("application_status") == "SUCCESS":
+                        save_application_result({
+                            "user_id": user_id,
+                            "result": {
+                                "url": job.get("url", ""),
+                                "title": job.get("title", "Unknown Position"),
+                                "company": job.get("company", "Unknown Company"),
+                                "status": "applied",
+                                "timestamp": job.get("application_timestamp") or datetime.now().isoformat(),
+                                "match_score": job.get("similarity_score", 0)
+                            }
+                        })
+            except Exception as e:
+                print(f"Warning: Could not save results: {e}")
 
-            set_status("completed", {"jobs_found": len(jobs), "results": results})
-            applied_count = len([r for r in results if r.get("status") == "applied"]) if submit else 0
-            return {"jobs_found": len(jobs), "applications_created": applied_count, "status": "completed"}
+            set_status("completed", {
+                "jobs_found": jobs_found,
+                "applications_attempted": applications_attempted,
+                "applications_successful": applications_successful,
+                "summary": result.get("summary", ""),
+                "duration": result.get("duration_seconds", 0)
+            })
+            
+            return {
+                "jobs_found": jobs_found,
+                "applications_created": applications_successful,
+                "applications_attempted": applications_attempted,
+                "status": "completed",
+                "summary": result.get("summary", "")
+            }
+            
+        except Exception as e:
+            print(f"❌ Automation error: {e}")
+            import traceback
+            traceback.print_exc()
+            set_status("failed", {"reason": str(e)})
+            return {
+                "status": "failed",
+                "reason": str(e),
+                "jobs_found": 0,
+                "applications_created": 0
+            }
         finally:
             try:
-                await bot.stop()
+                if bot.browser:
+                    await bot.browser.close()
             except Exception:
                 pass
     

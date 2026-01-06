@@ -3,18 +3,17 @@ AutoAgentHire FastAPI Endpoints
 Handles frontend requests and automation orchestration
 """
 
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException
-from fastapi.responses import JSONResponse
-from pathlib import Path
-import shutil
 import asyncio
+from pathlib import Path
 from typing import Optional
+
+from fastapi import APIRouter, HTTPException
 
 from backend.agents.autoagenthire_bot import AutoAgentHireBot
 
 router = APIRouter(prefix="/api", tags=["AutoAgentHire"])
 
-# Store active automation tasks
+# Store active automation tasks (used by /autoagenthire/start and status endpoints)
 active_tasks = {}
 
 
@@ -26,154 +25,338 @@ async def health_check():
 
 @router.get("/agent/status")
 async def agent_status():
-    """Check if agents are configured"""
-    import os
-    from dotenv import load_dotenv
-    
-    load_dotenv()
-    
-    gemini_key = os.getenv('GEMINI_API_KEY', '')
-    gemini_configured = bool(gemini_key and not gemini_key.startswith('your_'))
-    linkedin_configured = bool(os.getenv('LINKEDIN_EMAIL') and os.getenv('LINKEDIN_PASSWORD'))
-    
-    return {
-        "agents": {
-            "gemini_ai": "configured" if gemini_configured else "not_configured",
-            "linkedin": "configured" if linkedin_configured else "not_configured"
-        }
-    }
+    """Deprecated shim: agent status lives under `/api/agent/status` (api_routes)."""
+    raise HTTPException(
+        status_code=410,
+        detail="This endpoint moved to /api/agent/status"
+    )
 
 
-@router.post("/run-agent")
-async def run_agent(
-    file: UploadFile = File(...),
-    keyword: str = Form(...),
-    location: str = Form(...),
-    skills: str = Form(...),
-    experience_level: str = Form("Any"),
-    job_type: str = Form("Any"),
-    salary_range: str = Form("Any"),
-    max_jobs: int = Form(15),
-    similarity_threshold: float = Form(0.6),
-    auto_apply: bool = Form(True)
-):
+from pydantic import BaseModel
+
+class JobSearchRequest(BaseModel):
+    linkedin_email: Optional[str] = None
+    linkedin_password: Optional[str] = None
+    job_role: Optional[str] = "Software Engineer"
+    location: Optional[str] = "United States"
+    remote_only: Optional[bool] = False
+    easy_apply_only: Optional[bool] = True
+    max_results: Optional[int] = 25
+
+class StartAutomationRequest(BaseModel):
+    linkedin_email: Optional[str] = None
+    linkedin_password: Optional[str] = None
+    job_role: Optional[str] = "Software Engineer"
+    location: Optional[str] = "United States"
+    max_applications: Optional[int] = 10
+    easy_apply_only: Optional[bool] = True
+
+class ApplySingleRequest(BaseModel):
+    linkedin_email: Optional[str] = None
+    linkedin_password: Optional[str] = None
+    job_url: str
+    job_title: Optional[str] = None
+    company: Optional[str] = None
+    # Safety first: by default do NOT click the final Submit button.
+    dry_run: Optional[bool] = True
+
+
+@router.get("/api/applications")
+async def get_applications():
     """
-    Run the complete AutoAgentHire automation
-    
-    Process:
-    1. Save uploaded resume
-    2. Initialize automation bot
-    3. Run complete workflow
-    4. Return results
+    Get all submitted job applications
     """
-    
     try:
-        # Validate resume file
-        if not file.filename:
-            raise HTTPException(status_code=400, detail="No filename provided")
-            
-        if not file.filename.endswith('.pdf'):
-            raise HTTPException(status_code=400, detail="Only PDF resumes are accepted")
-        
-        # Save resume to temp location
-        resume_dir = Path("uploads/resumes")
-        resume_dir.mkdir(parents=True, exist_ok=True)
-        
-        resume_path = resume_dir / file.filename
-        
-        # Save file content
-        with open(resume_path, "wb") as buffer:
-            content = await file.read()
-            buffer.write(content)
-        
-        print(f"📄 Resume saved: {resume_path}")
-        
-        # Prepare configuration
-        config = {
-            'resume_path': str(resume_path),
-            'keyword': keyword,
-            'location': location,
-            'skills': skills,
-            'experience_level': experience_level,
-            'job_type': job_type,
-            'salary_range': salary_range,
-            'max_jobs': min(max_jobs, 50),  # Safety limit
-            'similarity_threshold': similarity_threshold,
-            'auto_apply': auto_apply
-        }
-        
-        print("\n🤖 Starting AutoAgentHire automation...")
-        print(f"📋 Config: {config}")
-        
-        # Initialize and run bot
-        bot = AutoAgentHireBot(config)
-        result = await bot.run_automation()
-        
-        # Prepare response
-        response = {
-            "status": "success" if result['applications_successful'] > 0 or len(result['jobs']) > 0 else "partial",
-            "message": result['summary'],
-            "data": result
-        }
-        
-        # Save report
-        report_dir = Path("reports")
-        report_dir.mkdir(exist_ok=True)
-        
+        from pathlib import Path
         import json
-        from datetime import datetime
         
-        report_file = report_dir / f"autoagenthire_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-        with open(report_file, 'w') as f:
-            json.dump(result, f, indent=2)
+        applications_file = Path("data/applications.json")
         
-        print(f"💾 Report saved: {report_file}")
-        
-        return JSONResponse(content=response)
-        
-    except Exception as e:
-        print(f"❌ API Error: {str(e)}")
-        
-        return JSONResponse(
-            status_code=500,
-            content={
-                "status": "error",
-                "message": str(e),
-                "data": {
-                    "jobs_found": 0,
-                    "jobs_analyzed": 0,
-                    "applications_attempted": 0,
-                    "applications_successful": 0,
-                    "jobs": [],
-                    "summary": f"Error: {str(e)}",
-                    "errors": [str(e)]
-                }
+        if not applications_file.exists():
+            return {
+                "status": "success",
+                "applications": [],
+                "count": 0
             }
-        )
-
-
-@router.get("/reports/latest")
-async def get_latest_report():
-    """Get the most recent automation report"""
-    try:
-        report_dir = Path("reports")
         
-        if not report_dir.exists():
-            return {"status": "no_reports", "data": None}
+        with open(applications_file, 'r') as f:
+            applications = json.load(f)
         
-        reports = sorted(report_dir.glob("autoagenthire_*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
-        
-        if not reports:
-            return {"status": "no_reports", "data": None}
-        
-        import json
-        with open(reports[0], 'r') as f:
-            data = json.load(f)
-        
-        return {"status": "success", "data": data}
+        return {
+            "status": "success",
+            "applications": applications,
+            "count": len(applications)
+        }
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/autoagenthire/search-jobs")
+async def search_linkedin_jobs(request: JobSearchRequest):
+    """
+    Search for LinkedIn jobs without applying
+    Returns job listings with URLs that users can click
+    """
+    import json
+    
+    try:
+        # Get credentials from request (frontend-only)
+        linkedin_email = (request.linkedin_email or "").strip()
+        linkedin_password = request.linkedin_password or ""
+        
+        # Check if credentials are placeholder values or not configured
+        is_placeholder = (
+            not linkedin_email or 
+            not linkedin_password or
+            'example.com' in linkedin_email or
+            'your-' in linkedin_email.lower() or
+            'your-' in linkedin_password.lower() or
+            linkedin_password == 'your-encrypted-password'
+        )
+        
+        if is_placeholder:
+            # Return sample jobs if credentials not configured
+            return {
+                "status": "demo",
+                "message": "LinkedIn credentials not configured. Showing sample jobs.",
+                "jobs": generate_sample_jobs(request.job_role or "Software Engineer", request.location or "United States", request.max_results or 25)
+            }
+        
+        # Initialize bot for job search only
+        config = {
+            'keyword': request.job_role or "Software Engineer",
+            'location': request.location or "United States",
+            'max_jobs': min(request.max_results or 25, 50),
+            'easy_apply_only': request.easy_apply_only,
+            'search_only': True,  # Don't apply, just search
+            'linkedin_email': linkedin_email,
+            'linkedin_password': linkedin_password,
+        }
+        
+        print(f"\n🔍 Searching LinkedIn for: {config['keyword']} in {config['location']}")
+        
+        bot = AutoAgentHireBot(config)
+        
+        # Only search, don't apply
+        jobs = await bot.search_jobs_only()
+        
+        return {
+            "status": "success",
+            "message": f"Found {len(jobs)} jobs",
+            "jobs": jobs
+        }
+        
+    except Exception as e:
+        print(f"❌ Job search error: {str(e)}")
+        # Return sample jobs on error
+        return {
+            "status": "fallback",
+            "message": f"Using sample data: {str(e)}",
+            "jobs": generate_sample_jobs(request.job_role or "Software Engineer", request.location or "United States", request.max_results or 25)
+        }
+
+
+@router.post("/autoagenthire/start")
+async def start_automation(request: StartAutomationRequest):
+    """Start the full automation process"""
+    import uuid
+    
+    run_id = str(uuid.uuid4())[:8]
+    
+    try:
+        linkedin_email = (request.linkedin_email or "").strip()
+        linkedin_password = request.linkedin_password or ""
+
+        if not linkedin_email or not linkedin_password:
+            return {
+                "status": "error",
+                "message": "LinkedIn credentials are required (frontend must send linkedin_email/linkedin_password)"
+            }
+        
+        config = {
+            'keyword': request.job_role or "Software Engineer",
+            'location': request.location or "United States",
+            'max_applications': min(request.max_applications or 10, 20),
+            'easy_apply_only': request.easy_apply_only,
+            'auto_apply': True,
+            # Frontend-supplied credentials (do not rely on backend .env)
+            'linkedin_email': linkedin_email,
+            'linkedin_password': linkedin_password,
+        }
+        
+        # Store task
+        active_tasks[run_id] = {
+            "status": "started",
+            "config": config
+        }
+        
+        # Run in background
+        asyncio.create_task(run_automation_task(run_id, config))
+        
+        return {
+            "status": "started",
+            "run_id": run_id,
+            "message": f"Automation started. Applying to up to {config['max_applications']} jobs."
+        }
+        
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": str(e)
+        }
+
+
+@router.get("/autoagenthire/run/{run_id}")
+async def get_automation_run(run_id: str):
+    """Get status/result for a previously started background automation run."""
+    if run_id not in active_tasks:
+        raise HTTPException(status_code=404, detail="run_id not found")
+    return {
+        "run_id": run_id,
+        **active_tasks[run_id],
+    }
+
+
+@router.post("/autoagenthire/apply-single")
+async def apply_single_job(request: ApplySingleRequest):
+    """Apply to a single job"""
+    try:
+        linkedin_email = (request.linkedin_email or "").strip()
+        linkedin_password = request.linkedin_password or ""
+        
+        if not linkedin_email or not linkedin_password:
+            return {
+                "success": False,
+                "message": "LinkedIn credentials are required (frontend must send linkedin_email/linkedin_password)"
+            }
+        
+        config = {
+            'single_job_url': request.job_url,
+            'job_title': request.job_title,
+            'company': request.company,
+            'auto_apply': True,
+            # Default to safe mode unless explicitly enabled in request payload
+            'dry_run': getattr(request, 'dry_run', True),
+            'linkedin_email': linkedin_email,
+            'linkedin_password': linkedin_password,
+        }
+
+        bot = AutoAgentHireBot(config)
+        try:
+            result = await bot.apply_to_single_job(request.job_url)
+        finally:
+            try:
+                await bot.close()
+            except Exception:
+                pass
+
+        return {
+            "success": result.get('success', False),
+            "status": result.get('status', None),
+            "message": result.get('message', 'Application processed'),
+            "job": result.get('job', None)
+        }
+        
+    except Exception as e:
+        return {
+            "success": False,
+            "message": str(e)
+        }
+
+
+async def run_automation_task(run_id: str, config: dict):
+    """Background task to run automation"""
+    try:
+        bot = AutoAgentHireBot(config)
+        result = await bot.run_automation()
+        
+        active_tasks[run_id] = {
+            "status": "completed",
+            "result": result
+        }
+        
+        # Save to applications
+        if result.get('applications_successful', 0) > 0:
+            save_applications_to_file(result.get('jobs', []))
+            
+    except Exception as e:
+        active_tasks[run_id] = {
+            "status": "error",
+            "error": str(e)
+        }
+
+
+def save_applications_to_file(jobs: list):
+    """Save successful applications to applications.json"""
+    import json
+    from datetime import datetime
+    
+    applications_file = Path("data/applications.json")
+    applications_file.parent.mkdir(parents=True, exist_ok=True)
+    
+    # Load existing
+    existing = []
+    if applications_file.exists():
+        try:
+            with open(applications_file, 'r') as f:
+                existing = json.load(f)
+        except:
+            existing = []
+    
+    # Add new applications
+    for job in jobs:
+        if job.get('applied', False):
+            app = {
+                "id": len(existing) + 1,
+                "title": job.get('title', 'Unknown'),
+                "company": job.get('company', 'Unknown'),
+                "url": job.get('url', ''),
+                "status": "applied",
+                "applied_date": datetime.now().isoformat(),
+                "match_score": int(job.get('match_score', 0) * 100) if job.get('match_score', 0) <= 1 else job.get('match_score', 80)
+            }
+            existing.append(app)
+    
+    # Save
+    with open(applications_file, 'w') as f:
+        json.dump(existing, f, indent=2)
+
+
+def generate_sample_jobs(job_role: str, location: str, count: int = 10) -> list:
+    """Generate sample LinkedIn jobs for demo/testing"""
+    import random
+    
+    companies = [
+        "Google", "Microsoft", "Amazon", "Apple", "Meta", "Netflix", "Tesla",
+        "Salesforce", "Adobe", "Oracle", "IBM", "Intel", "Cisco", "VMware",
+        "Uber", "Airbnb", "Spotify", "Stripe", "Shopify", "Slack"
+    ]
+    
+    locations = [
+        f"{location}", "Remote", f"Remote - {location}", 
+        "San Francisco, CA", "New York, NY", "Seattle, WA", "Austin, TX"
+    ]
+    
+    jobs = []
+    for i in range(min(count, 25)):
+        company = random.choice(companies)
+        job_id = random.randint(3000000000, 4000000000)
+        
+        jobs.append({
+            "id": str(job_id),
+            "title": f"{job_role}" if i % 3 == 0 else f"Senior {job_role}" if i % 3 == 1 else f"Staff {job_role}",
+            "company": company,
+            "location": random.choice(locations),
+            "salary": f"${random.randint(100, 250)}k - ${random.randint(250, 400)}k",
+            "posted": f"{random.randint(1, 7)} days ago",
+            "match_score": random.randint(75, 98),
+            "url": f"https://www.linkedin.com/jobs/view/{job_id}",
+            "is_easy_apply": True,
+            "description": f"Join {company} as a {job_role}. We're looking for talented individuals to help build the future."
+        })
+    
+    return jobs
 
 
 def register_autoagenthire_routes(app):

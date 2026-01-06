@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, BackgroundTasks, UploadFile, File,
 from pydantic import BaseModel, EmailStr, Field
 import logging
 import os
+import json
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -113,40 +114,132 @@ app_state = ApplicationState()
 @router.post("/run-agent")
 async def run_agent(
     background_tasks: BackgroundTasks,
-    request: Optional[Dict[str, Any]] = None
+    file: UploadFile = File(...),
+    keyword: str = Form(...),
+    location: str = Form(...),
+    skills: str = Form(...),
+    linkedin_email: str = Form(...),
+    linkedin_password: str = Form(...),
+    experience_level: str = Form("Any"),
+    job_type: str = Form("Any"),
+    salary_range: str = Form("Any"),
+    max_jobs: int = Form(15),
+    max_applications: int = Form(5),
+    similarity_threshold: float = Form(0.6),
+    auto_apply: str = Form("true"),
+    first_name: str = Form(""),
+    last_name: str = Form(""),
+    phone_number: str = Form(""),
+    linkedin_url: str = Form(""),
+    portfolio_url: str = Form(""),
+    city: str = Form(""),
+    state: str = Form(""),
+    country: str = Form(""),
+    # NEW: Accept comprehensive user profile as JSON string
+    user_profile_json: str = Form("{}")
 ):
     """
-    Start the automated job application agent.
+    Start the automated job application agent with resume upload and user profile.
     
     This endpoint triggers the full workflow:
-    1. Login to LinkedIn
-    2. Search for jobs matching criteria
-    3. Evaluate job matches using AI
-    4. Preview or submit applications
+    1. Upload and parse resume
+    2. Login to LinkedIn
+    3. Search for jobs matching criteria
+    4. Evaluate job matches using AI
+    5. Auto-fill application forms with user profile data (NEW)
+    6. Submit applications automatically
+    
+    NEW: The user_profile_json parameter accepts a JSON string with complete user info
+    for automatic form filling (name, contact, address, work history, education, etc.)
     """
     if app_state.status == "running":
         raise HTTPException(400, "Agent is already running")
     
     try:
-        data = request or {}
+        # Save resume file
+        upload_dir = "uploads/resumes"
+        os.makedirs(upload_dir, exist_ok=True)
+        
+        resume_path = os.path.join(upload_dir, f"{linkedin_email}_{file.filename}")
+        with open(resume_path, "wb") as f:
+            content = await file.read()
+            f.write(content)
+        
+        logger.info(f"Resume saved for agent run: {resume_path}")
+        
+        # NEW: Parse user profile JSON
+        try:
+            user_profile = json.loads(user_profile_json) if user_profile_json else {}
+        except json.JSONDecodeError:
+            logger.warning("Invalid user_profile_json, using empty profile")
+            user_profile = {}
+        
+        # Merge form fields into user profile (for backward compatibility)
+        if not user_profile:
+            user_profile = {}
+        
+        if first_name and not user_profile.get('first_name'):
+            user_profile['first_name'] = first_name
+        if last_name and not user_profile.get('last_name'):
+            user_profile['last_name'] = last_name
+        if phone_number and not user_profile.get('phone_number'):
+            user_profile['phone_number'] = phone_number
+        if city and not user_profile.get('city'):
+            user_profile['city'] = city
+        if state and not user_profile.get('state'):
+            user_profile['state'] = state
+        if country and not user_profile.get('country'):
+            user_profile['country'] = country
+        if linkedin_url and not user_profile.get('linkedin_url'):
+            user_profile['linkedin_url'] = linkedin_url
+        if portfolio_url and not user_profile.get('portfolio_url'):
+            user_profile['portfolio_url'] = portfolio_url
+        
+        # Prepare data for workflow
+        data = {
+            "resume_path": resume_path,
+            "keyword": keyword,
+            "location": location,
+            "skills": skills,
+            "linkedin_email": linkedin_email,
+            "linkedin_password": linkedin_password,
+            "experience_level": experience_level,
+            "job_type": job_type,
+            "salary_range": salary_range,
+            "max_jobs": max_jobs,
+            "max_applications": max_applications,
+            "similarity_threshold": similarity_threshold,
+            "auto_apply": auto_apply.lower() in ("true", "1", "yes"),
+            # Include individual fields for backward compatibility
+            "first_name": first_name,
+            "last_name": last_name,
+            "phone_number": phone_number,
+            "linkedin_url": linkedin_url,
+            "portfolio_url": portfolio_url,
+            "city": city,
+            "state": state,
+            "country": country,
+            # NEW: Pass complete user profile to bot
+            "user_profile": user_profile
+        }
         
         # Reset state
         app_state.reset()
         app_state.status = "running"
         app_state.start_time = datetime.now()
-        app_state.add_log("INFO", "Agent started")
+        app_state.add_log("INFO", f"Agent started for {linkedin_email} with auto-fill profile")
         
         # Run in background
         background_tasks.add_task(execute_agent_workflow, data)
         
         return {
             "status": "started",
-            "message": "Agent workflow started in background",
+            "message": "Agent workflow started with auto-fill enabled",
             "job_id": "agent-run-1"
         }
         
     except Exception as e:
-        logger.error(f"Failed to start agent: {e}")
+        logger.error(f"Failed to start agent: {e}", exc_info=True)
         app_state.status = "failed"
         app_state.add_log("ERROR", str(e))
         raise HTTPException(500, f"Failed to start agent: {e}")
@@ -205,9 +298,9 @@ async def upload_resume(
 ):
     """
     Upload and process resume for the user.
-    Extracts text and stores for AI processing.
+    Extracts text, parses structured data, and generates AI summary.
     """
-    if not file.filename.endswith(('.pdf', '.docx', '.txt')):
+    if not file.filename or not file.filename.endswith(('.pdf', '.docx', '.txt')):
         raise HTTPException(400, "Only PDF, DOCX, and TXT files are supported")
     
     try:
@@ -221,26 +314,49 @@ async def upload_resume(
             content = await file.read()
             f.write(content)
         
-        # Extract text
-        from backend.parsers.resume_parser import extract_resume_text
-        resume_text = extract_resume_text(file_path)
+        logger.info(f"Resume uploaded: {file_path}")
+        
+        # Parse resume with structured extraction
+        from backend.parsers.resume_parser import ResumeParser
+        parser = ResumeParser()
+        parsed_data = parser.parse(file_path)
+        
+        # Extract key information
+        resume_text = parsed_data.get("raw_text", "")
+        skills = parsed_data.get("skills", [])
+        experience = parsed_data.get("experience", [])
+        education = parsed_data.get("education", [])
+        contact = parsed_data.get("contact", {})
         
         # Generate summary using Gemini
         from backend.llm.gemini_service import get_gemini_service
         gemini = get_gemini_service()
         summary = gemini.generate_resume_summary(resume_text)
         
+        logger.info(f"Resume parsed successfully - Skills: {len(skills)}, Experience: {len(experience)}")
+        
         return {
             "status": "success",
             "filename": file.filename,
             "file_path": file_path,
             "text_length": len(resume_text),
-            "summary": summary
+            "summary": summary,
+            "parsed_data": {
+                "skills": skills,
+                "experience": experience,
+                "education": education,
+                "contact": contact
+            },
+            "metadata": {
+                "skills_count": len(skills),
+                "experience_count": len(experience),
+                "education_count": len(education)
+            }
         }
         
     except Exception as e:
-        logger.error(f"Error uploading resume: {e}")
-        raise HTTPException(500, f"Failed to process resume: {e}")
+        logger.error(f"Error uploading resume: {e}", exc_info=True)
+        raise HTTPException(500, f"Failed to process resume: {str(e)}")
 
 
 @router.post("/generate-cover-letter")
@@ -249,22 +365,44 @@ async def generate_cover_letter(
     company: str = Form(...),
     job_description: str = Form(...),
     user_name: str = Form(...),
-    resume_text: str = Form(...)
+    resume_text: str = Form(...),
+    ai_provider: str = Form("gemini"),
+    api_key: Optional[str] = Form(None)
 ):
     """
     Generate AI-powered cover letter for a job application.
+    Supports multiple AI providers: gemini, groq, openai
     """
     try:
-        from backend.llm.gemini_service import get_gemini_service
-        gemini = get_gemini_service()
+        from backend.llm.multi_ai_service import MultiAIService, AIProvider
         
-        cover_letter = gemini.generate_cover_letter(
+        # Validate provider
+        valid_providers = ["gemini", "groq", "openai"]
+        if ai_provider not in valid_providers:
+            raise HTTPException(400, f"Invalid AI provider. Choose from: {', '.join(valid_providers)}")
+        
+        # Initialize AI service with specified provider and API key
+        ai_service = MultiAIService(
+            provider=ai_provider,  # type: ignore
+            api_key=api_key
+        )
+        
+        if not ai_service.is_available():
+            raise HTTPException(
+                400, 
+                f"AI provider '{ai_provider}' is not available. Please check your API key."
+            )
+        
+        cover_letter = ai_service.generate_cover_letter(
             job_title=job_title,
-            company=company,
+            company_name=company,
             job_description=job_description,
             resume_text=resume_text,
             user_name=user_name
         )
+        
+        if not cover_letter:
+            raise HTTPException(500, "Failed to generate cover letter")
         
         # Save cover letter
         upload_dir = "uploads/cover_letters"
@@ -293,26 +431,44 @@ async def answer_application_question(
     job_title: str = Form(...),
     company: str = Form(...),
     resume_text: str = Form(...),
-    max_words: Optional[int] = Form(None)
+    max_words: Optional[int] = Form(None),
+    ai_provider: str = Form("gemini"),
+    api_key: Optional[str] = Form(None)
 ):
     """
     Generate intelligent answer to application question using AI.
+    Supports multiple AI providers: gemini, groq, openai
     """
     try:
-        from backend.llm.gemini_service import get_gemini_service
-        gemini = get_gemini_service()
+        from backend.llm.multi_ai_service import MultiAIService
         
-        job_context = {
-            "title": job_title,
-            "company": company
-        }
+        # Validate provider
+        valid_providers = ["gemini", "groq", "openai"]
+        if ai_provider not in valid_providers:
+            raise HTTPException(400, f"Invalid AI provider. Choose from: {', '.join(valid_providers)}")
         
-        answer = gemini.answer_application_question(
-            question=question,
-            job_context=job_context,
-            resume_text=resume_text,
-            max_words=max_words
+        # Initialize AI service
+        ai_service = MultiAIService(
+            provider=ai_provider,  # type: ignore
+            api_key=api_key
         )
+        
+        if not ai_service.is_available():
+            raise HTTPException(
+                400, 
+                f"AI provider '{ai_provider}' is not available. Please check your API key."
+            )
+        
+        job_context = f"Job Title: {job_title}\nCompany: {company}"
+        
+        answer = ai_service.answer_question(
+            question=question,
+            resume_text=resume_text,
+            job_context=job_context
+        )
+        
+        if not answer:
+            raise HTTPException(500, "Failed to generate answer")
         
         return {
             "status": "success",
@@ -325,6 +481,137 @@ async def answer_application_question(
         raise HTTPException(500, f"Failed to generate answer: {e}")
 
 
+@router.post("/match-profile")
+async def match_profile(
+    resume_file_path: str = Form(...),
+    job_description: str = Form(...),
+    job_title: str = Form(""),
+    company_name: str = Form(""),
+    ai_provider: str = Form("gemini"),
+    api_key: Optional[str] = Form(None)
+):
+    """
+    Match a resume against a job description and return compatibility score.
+    Returns match score (0-100), reasoning, strengths, concerns, and recommendation.
+    
+    Supports multiple AI providers: gemini, groq, openai
+    """
+    try:
+        from backend.parsers.resume_parser import ResumeParser
+        from backend.matching.profile_matcher import ProfileMatcher
+        
+        # Validate provider
+        valid_providers = ["gemini", "groq", "openai"]
+        if ai_provider not in valid_providers:
+            raise HTTPException(400, f"Invalid AI provider. Choose from: {', '.join(valid_providers)}")
+        
+        # Check if resume file exists
+        if not os.path.exists(resume_file_path):
+            raise HTTPException(404, f"Resume file not found: {resume_file_path}")
+        
+        # Parse the resume
+        parser = ResumeParser()
+        resume_data = parser.parse(resume_file_path)
+        
+        # Match against job
+        matcher = ProfileMatcher(ai_provider=ai_provider, api_key=api_key)  # type: ignore
+        match_result = matcher.match_profile(
+            resume_data=resume_data,
+            job_description=job_description,
+            job_title=job_title,
+            company_name=company_name
+        )
+        
+        return {
+            "status": "success",
+            "match_score": match_result["match_score"],
+            "reasoning": match_result["reasoning"],
+            "strengths": match_result["strengths"],
+            "concerns": match_result["concerns"],
+            "recommendation": match_result["recommendation"],
+            "extracted_skills": resume_data.get("skills", []),
+            "experience_count": len(resume_data.get("experience", []))
+        }
+        
+    except FileNotFoundError as e:
+        logger.error(f"Resume file not found: {e}")
+        raise HTTPException(404, str(e))
+    except Exception as e:
+        logger.error(f"Error matching profile: {e}")
+        raise HTTPException(500, f"Failed to match profile: {e}")
+
+
+@router.post("/batch-match")
+async def batch_match_jobs(
+    resume_file_path: str = Form(...),
+    jobs: str = Form(...),  # JSON string of job list
+    min_score: int = Form(0),
+    ai_provider: str = Form("gemini"),
+    api_key: Optional[str] = Form(None)
+):
+    """
+    Match a resume against multiple jobs and return sorted results.
+    
+    Args:
+        resume_file_path: Path to the uploaded resume
+        jobs: JSON string containing array of job objects with title, company, description
+        min_score: Minimum match score to include (0-100)
+        ai_provider: AI provider (gemini, groq, openai)
+        api_key: Optional API key for the provider
+    
+    Returns:
+        List of jobs with match results, sorted by score (highest first)
+    """
+    try:
+        import json
+        from backend.parsers.resume_parser import ResumeParser
+        from backend.matching.profile_matcher import ProfileMatcher
+        
+        # Validate provider
+        valid_providers = ["gemini", "groq", "openai"]
+        if ai_provider not in valid_providers:
+            raise HTTPException(400, f"Invalid AI provider. Choose from: {', '.join(valid_providers)}")
+        
+        # Check if resume file exists
+        if not os.path.exists(resume_file_path):
+            raise HTTPException(404, f"Resume file not found: {resume_file_path}")
+        
+        # Parse jobs JSON
+        try:
+            jobs_list = json.loads(jobs)
+            if not isinstance(jobs_list, list):
+                raise ValueError("Jobs must be an array")
+        except json.JSONDecodeError as e:
+            raise HTTPException(400, f"Invalid JSON format for jobs: {e}")
+        
+        # Parse the resume
+        parser = ResumeParser()
+        resume_data = parser.parse(resume_file_path)
+        
+        # Match against all jobs
+        matcher = ProfileMatcher(ai_provider=ai_provider, api_key=api_key)  # type: ignore
+        results = matcher.batch_match(
+            resume_data=resume_data,
+            jobs=jobs_list,
+            min_score=min_score
+        )
+        
+        return {
+            "status": "success",
+            "total_jobs": len(jobs_list),
+            "matched_jobs": len(results),
+            "min_score": min_score,
+            "results": results
+        }
+        
+    except FileNotFoundError as e:
+        logger.error(f"Resume file not found: {e}")
+        raise HTTPException(404, str(e))
+    except Exception as e:
+        logger.error(f"Error in batch matching: {e}")
+        raise HTTPException(500, f"Failed to batch match: {e}")
+
+
 @router.get("/applications")
 async def get_applications(
     user_email: Optional[str] = None,
@@ -332,17 +619,69 @@ async def get_applications(
     limit: int = 50
 ):
     """
-    Get application history.
+    Get application history with company names and LinkedIn job URLs.
     """
-    # TODO: Implement database query
-    # For now, return mock data
-    
-    return {
-        "applications": [],
-        "total": 0,
-        "page": 1,
-        "limit": limit
-    }
+    try:
+        from pathlib import Path
+        import json
+        
+        # Load applications from JSON file
+        applications_file = Path("data") / "applications.json"
+        
+        if not applications_file.exists():
+            return {
+                "applications": [],
+                "total": 0,
+                "page": 1,
+                "limit": limit
+            }
+        
+        with open(applications_file, 'r') as f:
+            all_applications = json.load(f)
+        
+        # Filter by user_email if provided
+        if user_email:
+            all_applications = [
+                app for app in all_applications 
+                if app.get("user_id") == user_email
+            ]
+        
+        # Filter by status if provided
+        if status:
+            all_applications = [
+                app for app in all_applications 
+                if app.get("result", {}).get("status") == status
+            ]
+        
+        # Format applications for frontend
+        formatted_apps = []
+        for app in all_applications[:limit]:
+            result = app.get("result", {})
+            formatted_apps.append({
+                "id": hash(result.get("url", "")),  # Generate ID from URL
+                "title": result.get("title", "Unknown Position"),
+                "company": result.get("company", "Unknown Company"),
+                "url": result.get("url", ""),
+                "status": result.get("status", "applied"),
+                "applied_date": result.get("timestamp", ""),
+                "match_score": result.get("match_score", 0)
+            })
+        
+        return {
+            "applications": formatted_apps,
+            "total": len(formatted_apps),
+            "page": 1,
+            "limit": limit
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to load applications: {e}")
+        return {
+            "applications": [],
+            "total": 0,
+            "page": 1,
+            "limit": limit
+        }
 
 
 @router.get("/jobs/search")
@@ -355,7 +694,26 @@ async def search_jobs(
     Search for jobs without automation (preview only).
     """
     try:
-        from backend.automation.linkedin_scraper import search_linkedin_jobs
+        # Try to import linkedin scraper, fallback to mock data if not available
+        try:
+            from backend.automation.linkedin_scraper import search_linkedin_jobs  # type: ignore
+        except ImportError:
+            # Return mock data if scraper not implemented yet
+            logger.warning("LinkedIn scraper not implemented, returning mock data")
+            return {
+                "status": "success",
+                "jobs": [
+                    {
+                        "id": "mock1",
+                        "title": f"{keywords} - Mock Job 1",
+                        "company": "Sample Company",
+                        "location": location or "Remote",
+                        "description": "This is a mock job listing. Implement linkedin_scraper.py for real jobs."
+                    }
+                ],
+                "count": 1,
+                "message": "Mock data - implement linkedin_scraper.py for real results"
+            }
         
         jobs = search_linkedin_jobs(
             keywords=keywords,
@@ -391,17 +749,23 @@ async def execute_agent_workflow(data: Dict[str, Any]):
         from backend.agents.orchestrator import AgentOrchestrator
         orchestrator = AgentOrchestrator()
         
-        # Prepare search criteria
+        # Prepare search criteria - handle both old and new format
+        keywords = data.get("keyword", data.get("keywords", ""))
+        
         search_criteria = {
-            "keywords": data.get("keywords", ""),
+            "keywords": keywords,
             "location": data.get("location", "Remote"),
             "linkedin_email": data.get("linkedin_email", ""),
             "linkedin_password": data.get("linkedin_password", ""),
-            "submit": data.get("submit", False)
+            "submit": data.get("auto_apply", data.get("submit", False)),
+            "resume_path": data.get("resume_path", ""),
+            "max_jobs": data.get("max_jobs", 15),
+            "max_applications": data.get("max_applications", 5),
+            "similarity_threshold": data.get("similarity_threshold", 0.6)
         }
         
         app_state.current_phase = "executing"
-        app_state.add_log("INFO", f"Starting job search: {search_criteria['keywords']}")
+        app_state.add_log("INFO", f"Starting job search: {search_criteria['keywords']} in {search_criteria['location']}")
         
         # Execute workflow
         result = await orchestrator.execute_job_search_workflow(
@@ -422,7 +786,7 @@ async def execute_agent_workflow(data: Dict[str, Any]):
         app_state.add_log("INFO", "Workflow completed successfully")
         
     except Exception as e:
-        logger.error(f"Agent workflow error: {e}")
+        logger.error(f"Agent workflow error: {e}", exc_info=True)
         app_state.status = "failed"
         app_state.end_time = datetime.now()
         app_state.errors.append(str(e))

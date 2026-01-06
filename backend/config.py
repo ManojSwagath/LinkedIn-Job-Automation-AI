@@ -112,7 +112,8 @@ class Settings(BaseSettings):
     REACT_APP_API_URL: str = "http://localhost:8000"
 
     # CORS - stored as comma-separated string in .env, parsed to list
-    CORS_ORIGINS: str = "http://localhost:3000,http://localhost:8501"
+    # Include both localhost and 127.0.0.1 for dev servers (Vite often runs on 127.0.0.1).
+    CORS_ORIGINS: str = "http://localhost:3000,http://localhost:8080,http://127.0.0.1:8080,http://localhost:8501"
     
     @property
     def cors_origins_list(self) -> List[str]:
@@ -153,14 +154,14 @@ class Settings(BaseSettings):
 
 # Global settings instance
 try:
-    settings = Settings()
+    settings = Settings()  # type: ignore[call-arg]
 except Exception as e:
     # If environment parsing/validation fails (common during local dev),
     # fall back to a minimal, safe Settings object constructed from
     # environment variables or sensible defaults so the app can start.
     import os
     print("Warning: Settings validation failed, falling back to minimal defaults:", e)
-    settings = Settings.construct(
+    settings = Settings.model_construct(  # Use model_construct instead of construct
         APP_NAME=os.environ.get("APP_NAME", "AutoAgentHire"),
         APP_ENV=os.environ.get("APP_ENV", "development"),
         DEBUG=os.environ.get("DEBUG", "True") in ["True", "true", "1"],

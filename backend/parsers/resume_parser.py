@@ -72,6 +72,7 @@ class ResumeParser:
             return "PDF parsing not available - PyPDF2 not installed"
         
         try:
+            import PyPDF2  # Import here to avoid unbound warning
             text = []
             with open(file_path, 'rb') as file:
                 pdf_reader = PyPDF2.PdfReader(file)
@@ -90,6 +91,7 @@ class ResumeParser:
             return "DOCX parsing not available - python-docx not installed"
         
         try:
+            from docx import Document  # Import here to avoid unbound warning
             doc = Document(file_path)
             text = []
             for paragraph in doc.paragraphs:
@@ -107,7 +109,7 @@ class ResumeParser:
     
     def _parse_text(self, text: str) -> Dict[str, Any]:
         """
-        Parse extracted text to structured data.
+        Parse extracted text to structured data using AI.
         
         Args:
             text: Raw text from resume
@@ -115,21 +117,73 @@ class ResumeParser:
         Returns:
             Structured resume data
         """
-        # TODO: Implement text parsing logic
-        # 1. Extract contact info (name, email, phone)
-        # 2. Extract work experience
-        # 3. Extract education
-        # 4. Extract skills
-        # 5. Extract certifications
-        
-        return {
-            "contact": {},
-            "experience": [],
-            "education": [],
-            "skills": [],
-            "certifications": [],
-            "raw_text": text
-        }
+        try:
+            # Import here to avoid circular imports
+            from backend.llm.multi_ai_service import MultiAIService
+            
+            # Use AI to extract structured data
+            ai_service = MultiAIService()
+            
+            prompt = f"""
+Extract structured information from the following resume text. Return ONLY a valid JSON object with these fields:
+
+1. "skills": Array of technical and professional skills (programming languages, tools, frameworks, soft skills)
+2. "experience": Array of objects with: "title", "company", "duration", "description"
+3. "education": Array of objects with: "degree", "institution", "year"
+4. "contact": Object with: "name", "email", "phone" (if available)
+5. "summary": Brief 2-3 sentence professional summary
+
+Resume text:
+{text[:4000]}
+
+Return ONLY the JSON object, no explanations or markdown formatting.
+"""
+            
+            response = ai_service.generate_text(prompt)
+            
+            # Try to parse the AI response as JSON
+            import json
+            import re
+            
+            # Ensure response is a string
+            if not response:
+                response = "{}"
+            
+            # Extract JSON from response (in case AI adds extra text)
+            json_match = re.search(r'\{.*\}', response, re.DOTALL)
+            if json_match:
+                parsed_data = json.loads(json_match.group())
+            else:
+                # Fallback to basic structure
+                parsed_data = {
+                    "contact": {},
+                    "experience": [],
+                    "education": [],
+                    "skills": [],
+                    "summary": ""
+                }
+            
+            # Ensure all required fields exist
+            parsed_data.setdefault("contact", {})
+            parsed_data.setdefault("experience", [])
+            parsed_data.setdefault("education", [])
+            parsed_data.setdefault("skills", [])
+            parsed_data.setdefault("summary", "")
+            parsed_data["raw_text"] = text
+            
+            return parsed_data
+            
+        except Exception as e:
+            logger.error(f"Error parsing resume with AI: {e}")
+            # Return basic structure with raw text
+            return {
+                "contact": {},
+                "experience": [],
+                "education": [],
+                "skills": [],
+                "summary": "",
+                "raw_text": text
+            }
 
 
 # Helper function for backward compatibility

@@ -1,99 +1,119 @@
--- Initial database schema
--- Run this file to create the initial database structure
-
--- Enable UUID extension
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-
--- Create users table
-CREATE TABLE IF NOT EXISTS users (
-    id SERIAL PRIMARY KEY,
-    email VARCHAR(255) UNIQUE NOT NULL,
-    password_hash VARCHAR(255) NOT NULL,
-    full_name VARCHAR(255),
-    phone VARCHAR(50),
-    location VARCHAR(255),
-    linkedin_url VARCHAR(500),
-    portfolio_url VARCHAR(500),
-    preferences JSONB,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    is_active BOOLEAN DEFAULT TRUE
-);
-
--- Create resumes table
-CREATE TABLE IF NOT EXISTS resumes (
+-- Create job_alerts table
+CREATE TABLE IF NOT EXISTS job_alerts (
     id SERIAL PRIMARY KEY,
     user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-    file_path VARCHAR(500) NOT NULL,
-    file_type VARCHAR(50),
-    parsed_data JSONB,
-    skills JSONB,
-    experience JSONB,
-    education JSONB,
+    keywords TEXT[],
+    locations TEXT[],
+    job_types VARCHAR(50)[],
+    min_salary INTEGER,
+    frequency VARCHAR(50) DEFAULT 'daily',
+    is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    is_active BOOLEAN DEFAULT TRUE
+    last_sent TIMESTAMP
 );
 
--- Create job_listings table
-CREATE TABLE IF NOT EXISTS job_listings (
-    id SERIAL PRIMARY KEY,
-    title VARCHAR(255) NOT NULL,
-    company VARCHAR(255) NOT NULL,
-    location VARCHAR(255),
-    description TEXT,
-    requirements TEXT,
-    salary_min INTEGER,
-    salary_max INTEGER,
-    job_type VARCHAR(50),
-    experience_level VARCHAR(50),
-    url VARCHAR(500) UNIQUE,
-    source VARCHAR(100),
-    scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    posted_date TIMESTAMP,
-    is_active BOOLEAN DEFAULT TRUE
-);
-
--- Create applications table
-CREATE TABLE IF NOT EXISTS applications (
+-- Create saved_jobs table
+CREATE TABLE IF NOT EXISTS saved_jobs (
     id SERIAL PRIMARY KEY,
     user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
     job_id INTEGER REFERENCES job_listings(id) ON DELETE CASCADE,
-    status VARCHAR(50) DEFAULT 'draft',
-    cover_letter TEXT,
-    custom_responses JSONB,
-    applied_at TIMESTAMP,
-    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    tracking_info JSONB,
-    notes TEXT
+    notes TEXT,
+    tags TEXT[],
+    saved_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id, job_id)
 );
 
--- Create job_matches table
-CREATE TABLE IF NOT EXISTS job_matches (
+-- Create application_history table
+CREATE TABLE IF NOT EXISTS application_history (
     id SERIAL PRIMARY KEY,
-    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-    job_id INTEGER REFERENCES job_listings(id) ON DELETE CASCADE,
-    match_score FLOAT NOT NULL,
-    reasoning TEXT,
-    strengths JSONB,
-    gaps JSONB,
+    application_id INTEGER REFERENCES applications(id) ON DELETE CASCADE,
+    status VARCHAR(50) NOT NULL,
+    notes TEXT,
+    changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Create interview_schedule table
+CREATE TABLE IF NOT EXISTS interview_schedule (
+    id SERIAL PRIMARY KEY,
+    application_id INTEGER REFERENCES applications(id) ON DELETE CASCADE,
+    interview_type VARCHAR(50),
+    scheduled_at TIMESTAMP NOT NULL,
+    location VARCHAR(255),
+    meeting_link VARCHAR(500),
+    interviewer_name VARCHAR(255),
+    interviewer_email VARCHAR(255),
+    notes TEXT,
+    status VARCHAR(50) DEFAULT 'scheduled',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Create credentials table (encrypted)
-CREATE TABLE IF NOT EXISTS credentials (
+-- Create cover_letter_templates table
+CREATE TABLE IF NOT EXISTS cover_letter_templates (
     id SERIAL PRIMARY KEY,
     user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-    platform VARCHAR(100) NOT NULL,
-    encrypted_data TEXT NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    content TEXT NOT NULL,
+    variables JSONB,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Create indices for performance
-CREATE INDEX idx_users_email ON users(email);
-CREATE INDEX idx_job_listings_title ON job_listings(title);
-CREATE INDEX idx_job_listings_company ON job_listings(company);
-CREATE INDEX idx_applications_user_id ON applications(user_id);
-CREATE INDEX idx_applications_job_id ON applications(job_id);
-CREATE INDEX idx_job_matches_user_id ON job_matches(user_id);
-CREATE INDEX idx_job_matches_score ON job_matches(match_score DESC);
+-- Create activity_logs table
+CREATE TABLE IF NOT EXISTS activity_logs (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    action VARCHAR(100) NOT NULL,
+    entity_type VARCHAR(50),
+    entity_id INTEGER,
+    details JSONB,
+    ip_address VARCHAR(50),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Create skills_taxonomy table
+CREATE TABLE IF NOT EXISTS skills_taxonomy (
+    id SERIAL PRIMARY KEY,
+    skill_name VARCHAR(255) UNIQUE NOT NULL,
+    category VARCHAR(100),
+    related_skills TEXT[],
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Create user_skills table
+CREATE TABLE IF NOT EXISTS user_skills (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    skill_id INTEGER REFERENCES skills_taxonomy(id) ON DELETE CASCADE,
+    proficiency_level VARCHAR(50),
+    years_experience FLOAT,
+    verified BOOLEAN DEFAULT FALSE,
+    UNIQUE(user_id, skill_id)
+);
+
+-- Additional indices for new tables
+CREATE INDEX idx_job_alerts_user_id ON job_alerts(user_id);
+CREATE INDEX idx_saved_jobs_user_id ON saved_jobs(user_id);
+CREATE INDEX idx_application_history_app_id ON application_history(application_id);
+CREATE INDEX idx_interview_schedule_app_id ON interview_schedule(application_id);
+CREATE INDEX idx_interview_schedule_date ON interview_schedule(scheduled_at);
+CREATE INDEX idx_activity_logs_user_id ON activity_logs(user_id);
+CREATE INDEX idx_activity_logs_created_at ON activity_logs(created_at DESC);
+CREATE INDEX idx_user_skills_user_id ON user_skills(user_id);
+
+-- Create triggers for updated_at timestamps
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ language 'plpgsql';
+
+CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_credentials_updated_at BEFORE UPDATE ON credentials
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_templates_updated_at BEFORE UPDATE ON cover_letter_templates
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();

@@ -5,7 +5,8 @@ Provides intelligent text generation, form filling, and decision-making capabili
 import os
 import logging
 from typing import Optional, Dict, Any, List
-import google.generativeai as genai
+import google.generativeai as genai  # type: ignore
+from google.generativeai.types import GenerationConfig  # type: ignore
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -21,7 +22,7 @@ class GeminiService:
     def __init__(
         self, 
         api_key: Optional[str] = None,
-        model_name: str = "gemini-pro",
+        model_name: str = "gemini-2.5-flash",
         temperature: float = 0.7
     ):
         """
@@ -29,10 +30,10 @@ class GeminiService:
         
         Args:
             api_key: Google API key (defaults to env variable)
-            model_name: Model to use
+            model_name: Model to use (default: gemini-1.5-flash)
             temperature: Temperature for generation (0-1)
         """
-        self.api_key = api_key or os.getenv("GOOGLE_API_KEY")
+        self.api_key = api_key or os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
         self.model_name = model_name
         self.temperature = temperature
         
@@ -41,8 +42,8 @@ class GeminiService:
             self.model = None
         else:
             try:
-                genai.configure(api_key=self.api_key)
-                self.model = genai.GenerativeModel(model_name)
+                genai.configure(api_key=self.api_key)  # type: ignore
+                self.model = genai.GenerativeModel(model_name)  # type: ignore
                 logger.info(f"Gemini service initialized with model: {model_name}")
             except Exception as e:
                 logger.error(f"Failed to initialize Gemini: {e}")
@@ -108,7 +109,7 @@ Sincerely,
         try:
             response = self.model.generate_content(
                 prompt,
-                generation_config=genai.types.GenerationConfig(
+                generation_config=genai.types.GenerationConfig(  # type: ignore
                     temperature=self.temperature,
                     max_output_tokens=1024,
                 )
@@ -172,7 +173,7 @@ Provide ONLY the answer text, no preamble or explanation.
         try:
             response = self.model.generate_content(
                 prompt,
-                generation_config=genai.types.GenerationConfig(
+                generation_config=genai.types.GenerationConfig(  # type: ignore
                     temperature=self.temperature,
                     max_output_tokens=512,
                 )
@@ -252,7 +253,7 @@ Respond with ONLY valid JSON, no other text.
         try:
             response = self.model.generate_content(
                 prompt,
-                generation_config=genai.types.GenerationConfig(
+                generation_config=genai.types.GenerationConfig(  # type: ignore
                     temperature=0.3,  # Lower temperature for more consistent output
                     max_output_tokens=512,
                 )
@@ -292,38 +293,54 @@ Respond with ONLY valid JSON, no other text.
             Resume summary
         """
         if not self.model:
-            return "Resume summary not available"
+            logger.warning("Gemini model not initialized, using fallback summary")
+            return "Resume processed successfully. Please configure GEMINI_API_KEY for AI-powered summaries."
+        
+        # Limit resume text to prevent token overflow
+        max_chars = 3000
+        truncated_text = resume_text[:max_chars]
+        if len(resume_text) > max_chars:
+            logger.info(f"Resume text truncated from {len(resume_text)} to {max_chars} characters")
         
         prompt = f"""
 Analyze this resume and create a concise professional summary.
 
 **Resume:**
-{resume_text[:2000]}
+{truncated_text}
 
 **Task:**
 Create a 3-4 sentence professional summary highlighting:
-1. Key skills and expertise
-2. Years of experience (if mentioned)
-3. Notable achievements
-4. Career focus
+1. Key skills and expertise areas
+2. Years of experience and seniority level (if mentioned)
+3. Notable achievements or specializations
+4. Primary career focus or domain
 
-Provide ONLY the summary text, no preamble.
+Provide ONLY the summary text in a professional tone, no preamble or markdown.
 """
         
         try:
             response = self.model.generate_content(
                 prompt,
-                generation_config=genai.types.GenerationConfig(
+                generation_config=GenerationConfig(
                     temperature=0.5,
                     max_output_tokens=256,
+                    top_p=0.9,
+                    top_k=40,
                 )
             )
             
-            return response.text.strip()
+            if response and response.text:
+                summary = response.text.strip()
+                logger.info(f"Generated resume summary: {len(summary)} characters")
+                return summary
+            else:
+                logger.warning("Empty response from Gemini API")
+                return "Experienced professional with diverse skill set and proven track record."
             
         except Exception as e:
-            logger.error(f"Error generating resume summary: {e}")
-            return "Professional with diverse experience and skills"
+            logger.error(f"Error generating resume summary with Gemini: {e}", exc_info=True)
+            # Return a generic but informative fallback
+            return "Professional candidate with relevant experience and qualifications. AI summary generation temporarily unavailable."
     
     def _fallback_cover_letter(self, job_title: str, company: str, user_name: str) -> str:
         """Fallback cover letter when Gemini is unavailable."""
