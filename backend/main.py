@@ -15,6 +15,9 @@ from backend.config import settings
 from backend.routes.api_routes import router as api_router
 from backend.routes.linkedin_jobs_routes import router as linkedin_jobs_router
 from backend.routes.agent_routes import router as agent_router
+from backend.routes.ats_routes import router as ats_router
+from backend.routes.cover_letter_routes import router as cover_letter_router
+from backend.api.autoagenthire import router as autoagenthire_router
 from backend.database.connection import init_db
 # from backend.utils.logger import setup_logger
 
@@ -94,6 +97,9 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.include_router(api_router)
 app.include_router(linkedin_jobs_router)
 app.include_router(agent_router)
+app.include_router(ats_router)
+app.include_router(cover_letter_router)
+app.include_router(autoagenthire_router)
 
 
 # Health check endpoint

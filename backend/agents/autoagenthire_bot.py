@@ -1006,7 +1006,14 @@ Return this exact JSON structure:
                             "steps": steps,
                             "errors": errors,
                         }
-                    await submit_btn.click()
+                    # Use fallback click for submit button
+                    if not await self._click_button_with_fallback(submit_btn, "Submit"):
+                        return {
+                            "status": "FAILED",
+                            "reason": "Could not click Submit button",
+                            "steps": steps,
+                            "errors": errors + ["submit_click_failed"],
+                        }
                     _step("submit_clicked")
                     await asyncio.sleep(random.uniform(2, 4))
                     if await self._verify_submission():
@@ -1029,7 +1036,14 @@ Return this exact JSON structure:
                 if next_btn:
                     label = (await next_btn.inner_text()) if hasattr(next_btn, 'inner_text') else "Next"
                     _step("next_clicked", label.strip() if isinstance(label, str) else "")
-                    await next_btn.click()
+                    # Use fallback click for next button
+                    if not await self._click_button_with_fallback(next_btn, "Next"):
+                        return {
+                            "status": "FAILED",
+                            "reason": "Could not click Next button",
+                            "steps": steps,
+                            "errors": errors + ["next_click_failed"],
+                        }
                     await asyncio.sleep(random.uniform(2, 4))
                     continue
 
@@ -1053,7 +1067,7 @@ Return this exact JSON structure:
             return {"status": "FAILED", "reason": str(e), "steps": steps, "errors": errors}
 
     async def _find_primary_button(self, selectors: list[str]):
-        """Return first visible, enabled button matching any selector."""
+        """Return first visible, enabled button matching any selector with JavaScript click fallback."""
         if not self.page:
             return None
         for sel in selectors:
@@ -1064,6 +1078,31 @@ Return this exact JSON structure:
             except Exception:
                 continue
         return None
+    
+    async def _click_button_with_fallback(self, button, button_name: str = "button") -> bool:
+        """Click button with JavaScript fallback for overlay issues.
+        
+        Returns:
+            bool: True if click succeeded, False otherwise
+        """
+        if not button or not self.page:
+            return False
+        
+        try:
+            # Try normal click first
+            await button.click()
+            print(f"  ✓ Clicked {button_name} (normal click)")
+            return True
+        except Exception as e:
+            print(f"  ⚠️  Normal click failed for {button_name}, trying JavaScript click: {str(e)[:50]}")
+            try:
+                # Fallback to JavaScript click (bypasses overlays)
+                await button.evaluate("element => element.click()")
+                print(f"  ✓ Clicked {button_name} (JavaScript fallback)")
+                return True
+            except Exception as e2:
+                print(f"  ❌ JavaScript click also failed for {button_name}: {str(e2)[:50]}")
+                return False
 
     async def _has_required_field_errors(self) -> bool:
         """Detect common validation errors shown in Easy Apply forms."""
@@ -1130,12 +1169,39 @@ Return this exact JSON structure:
         print(f"{'='*60}\n")
     
     async def _handle_resume_upload(self) -> None:
-        """Handle resume file upload in Easy Apply form"""
+        """Handle resume file upload in Easy Apply form with green checkmark verification"""
         if not self.page:
             return
             
         try:
-            # Look for file upload input
+            # First, check if a resume is already selected (green checkmark present)
+            selected_resume = await self.page.query_selector('input[type="radio"][name*="resume"]:checked')
+            if selected_resume:
+                print("  ✓ Resume already selected")
+                
+                # Verify with green checkmark
+                checkmark = await self.page.query_selector('.artdeco-icon[data-test-icon="check-mark"]')
+                if checkmark:
+                    print("  ✓ Resume verified with green checkmark")
+                return  # Resume already selected, nothing to do
+            
+            # Check for existing resumes (radio buttons)
+            existing_resumes = await self.page.query_selector_all('input[type="radio"][name*="resume"]')
+            
+            if existing_resumes and len(existing_resumes) > 0:
+                # Select first existing resume (most recently used)
+                print(f"  ✓ Found {len(existing_resumes)} existing resume(s)")
+                await existing_resumes[0].click()
+                await asyncio.sleep(1)
+                print("  ✓ Selected most recent resume")
+                
+                # Verify selection with green checkmark
+                checkmark = await self.page.query_selector('.artdeco-icon[data-test-icon="check-mark"]')
+                if checkmark:
+                    print("  ✓ Resume selection confirmed with green checkmark")
+                return
+            
+            # No existing resumes, look for file upload input
             file_inputs = await self.page.query_selector_all('input[type="file"]')
             
             for file_input in file_inputs:
@@ -1147,7 +1213,9 @@ Return this exact JSON structure:
                         if resume_path and Path(resume_path).exists():
                             await file_input.set_input_files(resume_path)
                             print(f"  ✓ Uploaded resume: {Path(resume_path).name}")
-                            await asyncio.sleep(1)
+                            await asyncio.sleep(2)  # Wait for upload to complete
+                        else:
+                            print(f"  ⚠️  Resume path not found: {resume_path}")
                 except Exception as e:
                     print(f"  ⚠️  Resume upload attempt failed: {str(e)}")
                     
@@ -1307,7 +1375,8 @@ Keep it concise, professional, and express genuine interest. Do not include plac
             return False
 
     async def _fill_application_form(self) -> None:
-        """Fill all fields on current application page with intelligent detection using user profile"""
+        """Fill all fields on current application page with intelligent detection using user profile.
+        Only targets fields INSIDE the Easy Apply modal to prevent filling background page fields."""
         if not self.page:
             raise Exception("Browser not initialized")
             
@@ -1324,16 +1393,28 @@ Keep it concise, professional, and express genuine interest. Do not include plac
             await self.page.wait_for_load_state('networkidle', timeout=5000)
             await asyncio.sleep(1)
             
-            # Get all input fields
-            inputs = await self.page.query_selector_all('input[type="text"], input[type="tel"], input[type="email"], input[type="number"], textarea')
+            # CRITICAL FIX: Only target fields INSIDE the Easy Apply modal
+            modal = await self.page.query_selector('.jobs-easy-apply-modal, .jobs-easy-apply-content')
+            if not modal:
+                print("⚠️  Warning: Could not find Easy Apply modal, trying full page")
+                modal = self.page  # Fallback to full page if modal not found
             
-            print(f"🔍 Found {len(inputs)} form fields to fill")
+            # Get all input fields INSIDE the modal only
+            inputs = await modal.query_selector_all('input[type="text"], input[type="tel"], input[type="email"], input[type="number"], textarea')
+            
+            print(f"🔍 Found {len(inputs)} form fields to fill (modal-specific)")
             filled_count = 0
             
             for input_field in inputs:
                 try:
                     # Check if field is visible and enabled
                     if not await input_field.is_visible():
+                        continue
+                    
+                    # Check if field is disabled or readonly
+                    is_disabled = await input_field.get_attribute('disabled')
+                    is_readonly = await input_field.get_attribute('readonly')
+                    if is_disabled is not None or is_readonly is not None:
                         continue
                     
                     # Check if already filled - skip if has value
@@ -1363,11 +1444,16 @@ Keep it concise, professional, and express genuine interest. Do not include plac
                 except Exception as e:
                     print(f"  ⚠️  Could not fill field: {str(e)[:50]}")
             
-            # Handle dropdowns
-            selects = await self.page.query_selector_all('select')
+            # Handle dropdowns (modal-specific)
+            selects = await modal.query_selector_all('select')
             for select in selects:
                 try:
                     if not await select.is_visible():
+                        continue
+                    
+                    # Check if disabled
+                    is_disabled = await select.get_attribute('disabled')
+                    if is_disabled is not None:
                         continue
                     
                     field_name = await select.get_attribute('name') or ''
@@ -1386,12 +1472,13 @@ Keep it concise, professional, and express genuine interest. Do not include plac
                         options = await select.query_selector_all('option')
                         if len(options) > 1:
                             await options[1].click()
+                            filled_count += 1
                             print(f"  ✅ Selected default dropdown option")
                 except Exception as e:
                     print(f"  ⚠️  Could not select dropdown: {str(e)[:50]}")
             
-            # Handle radio buttons (Yes for work authorization, No for sponsorship)
-            radios = await self.page.query_selector_all('input[type="radio"]')
+            # Handle radio buttons (modal-specific) - Yes for work authorization, No for sponsorship
+            radios = await modal.query_selector_all('input[type="radio"]')
             for radio in radios:
                 try:
                     if not await radio.is_visible():
@@ -1423,8 +1510,8 @@ Keep it concise, professional, and express genuine interest. Do not include plac
                 except Exception as e:
                     pass
             
-            # Handle checkboxes (check required ones)
-            checkboxes = await self.page.query_selector_all('input[type="checkbox"]')
+            # Handle checkboxes (modal-specific) - check required ones
+            checkboxes = await modal.query_selector_all('input[type="checkbox"]')
             for checkbox in checkboxes:
                 try:
                     if not await checkbox.is_visible():
@@ -1440,7 +1527,7 @@ Keep it concise, professional, and express genuine interest. Do not include plac
                 except Exception as e:
                     pass
             
-            print(f"✅ Form auto-fill complete! Filled {filled_count} fields")
+            print(f"✅ Form auto-fill complete! Filled {filled_count} fields (modal-specific)")
                     
         except Exception as e:
             print(f"⚠️  Form filling error: {str(e)}")

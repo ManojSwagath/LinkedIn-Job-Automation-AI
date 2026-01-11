@@ -40,8 +40,10 @@ export default function RecommendedJobs() {
   const [warning, setWarning] = useState<string | null>(null);
   const [linkedinEmail, setLinkedinEmail] = useState("");
   const [linkedinPassword, setLinkedinPassword] = useState("");
-  const [jobRole, setJobRole] = useState("ai_engineer");
-  const [enableFiltering, setEnableFiltering] = useState(false);  // Disabled by default for LinkedIn recommendations
+  // Default to backend roles (matches the screenshot flow) and keep filtering enabled
+  // so user-selected role actually influences the result list.
+  const [jobRole, setJobRole] = useState("backend_engineer");
+  const [enableFiltering, setEnableFiltering] = useState(true);
   const [availableRoles, setAvailableRoles] = useState<RoleOption[]>([]);
   const [filteredFrom, setFilteredFrom] = useState<number>(0);
   const { toast } = useToast();
@@ -56,13 +58,19 @@ export default function RecommendedJobs() {
   useEffect(() => {
     const fetchRoles = async () => {
       try {
-        const response = await fetch("http://localhost:8000/api/linkedin/available-roles");
+        const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+        const response = await fetch(`${API_BASE_URL}/api/linkedin/available-roles`);
         const data = await response.json();
         if (data.status === "success") {
           setAvailableRoles(data.roles);
         }
       } catch (err) {
         console.error("Failed to fetch available roles:", err);
+        toast({
+          title: "Connection Error",
+          description: "Could not connect to backend server. Make sure it's running on port 8000.",
+          variant: "destructive"
+        });
         // Set default roles if API fails
         setAvailableRoles([
           { key: "cloud_engineer", display_name: "Cloud Engineer" },
@@ -87,7 +95,8 @@ export default function RecommendedJobs() {
 
       console.log("Fetching jobs with role:", jobRole, "filtering:", enableFiltering);
 
-      const response = await fetch("http://localhost:8000/api/linkedin/recommended-jobs", {
+      const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+      const response = await fetch(`${API_BASE_URL}/api/linkedin/recommended-jobs`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

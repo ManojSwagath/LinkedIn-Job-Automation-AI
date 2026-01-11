@@ -14,6 +14,7 @@ import JobSearchConfig from "./pages/dashboard/JobSearchConfig";
 import Applications from "./pages/dashboard/Applications";
 import { ApiKeySettings } from "./components/ApiKeySettings";
 import RecommendedJobs from "./components/RecommendedJobs";
+import ATSChecker from "@/pages/ATSChecker";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient({
@@ -36,6 +37,7 @@ const App = () => (
           <Route path="/signup" element={<Signup />} />
           <Route path="/login" element={<Login />} />
           <Route path="/onboarding" element={<OnboardingIntegrated />} />
+          <Route path="/ats-checker" element={<ATSChecker />} />
           <Route path="/dashboard" element={<DashboardLayout />}>
             <Route index element={<DashboardHome />} />
             <Route path="search" element={<JobSearchConfig />} />
@@ -44,6 +46,7 @@ const App = () => (
             <Route path="resume" element={<DashboardHome />} />
             <Route path="settings" element={<ApiKeySettings />} />
             <Route path="help" element={<DashboardHome />} />
+            <Route path="ats" element={<ATSChecker />} />
           </Route>
           <Route path="*" element={<NotFound />} />
         </Routes>

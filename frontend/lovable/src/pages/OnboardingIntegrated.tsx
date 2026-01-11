@@ -106,6 +106,11 @@ const Onboarding = () => {
     localStorage.setItem('userProfile', JSON.stringify(formData));
     localStorage.setItem('resumeData', JSON.stringify(resumeData));
     
+    // Save resume path for automation
+    if (resumeData?.file_path) {
+      localStorage.setItem('resumePath', resumeData.file_path);
+    }
+    
     toast({
       title: "Setup Complete!",
       description: "Your profile is ready. Let's find your dream job!",

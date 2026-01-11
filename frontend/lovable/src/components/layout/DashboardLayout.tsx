@@ -12,7 +12,7 @@ const sidebarLinks = [
   { name: "Applications", href: "/dashboard/applications", icon: Briefcase },
   { name: "Job Search", href: "/dashboard/search", icon: Search },
   { name: "Recommended Jobs", href: "/dashboard/recommended", icon: Star },
-  { name: "Resume Manager", href: "/dashboard/resume", icon: FileText },
+  { name: "ATS Checker", href: "/ats-checker", icon: FileText },
   { name: "Settings", href: "/dashboard/settings", icon: Settings },
   { name: "Help & Support", href: "/dashboard/help", icon: HelpCircle },
 ];

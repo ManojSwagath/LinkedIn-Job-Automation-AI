@@ -48,6 +48,26 @@ const JobSearch = () => {
 
   const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
+  // Get user profile from localStorage
+  const getUserProfile = () => {
+    try {
+      const savedProfile = localStorage.getItem('userProfile');
+      return savedProfile ? JSON.parse(savedProfile) : {};
+    } catch {
+      return {};
+    }
+  };
+
+  // Get resume path from localStorage (if uploaded)
+  const getResumePath = () => {
+    try {
+      const resumeData = localStorage.getItem('resumePath');
+      return resumeData || null;
+    } catch {
+      return null;
+    }
+  };
+
   const ensureCreds = () => {
     if (!linkedinEmail || !linkedinPassword) {
       toast({
@@ -140,6 +160,10 @@ const JobSearch = () => {
       if (!ensureCreds()) return;
       setAutomationRunning(true);
       
+      // Get user profile and resume from localStorage
+      const userProfile = getUserProfile();
+      const resumePath = getResumePath();
+      
       const response = await fetch(`${API_BASE_URL}/api/autoagenthire/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -149,7 +173,9 @@ const JobSearch = () => {
           job_role: searchQuery,
           location: locationQuery,
           max_applications: jobs.length,
-          easy_apply_only: filters.easyApply
+          easy_apply_only: filters.easyApply,
+          resume_path: resumePath,
+          user_profile: userProfile
         })
       });
 
@@ -188,6 +214,10 @@ const JobSearch = () => {
         description: `Applying to ${job.title} at ${job.company}`,
       });
 
+      // Get user profile and resume from localStorage
+      const userProfile = getUserProfile();
+      const resumePath = getResumePath();
+
       const response = await fetch(`${API_BASE_URL}/api/autoagenthire/apply-single`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -196,7 +226,9 @@ const JobSearch = () => {
           linkedin_password: linkedinPassword,
           job_url: job.url,
           job_title: job.title,
-          company: job.company
+          company: job.company,
+          resume_path: resumePath,
+          user_profile: userProfile
         })
       });
 

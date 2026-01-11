@@ -50,6 +50,8 @@ class StartAutomationRequest(BaseModel):
     location: Optional[str] = "United States"
     max_applications: Optional[int] = 10
     easy_apply_only: Optional[bool] = True
+    resume_path: Optional[str] = None
+    user_profile: Optional[dict] = None
 
 class ApplySingleRequest(BaseModel):
     linkedin_email: Optional[str] = None
@@ -57,6 +59,8 @@ class ApplySingleRequest(BaseModel):
     job_url: str
     job_title: Optional[str] = None
     company: Optional[str] = None
+    resume_path: Optional[str] = None
+    user_profile: Optional[dict] = None
     # Safety first: by default do NOT click the final Submit button.
     dry_run: Optional[bool] = True
 
@@ -183,6 +187,9 @@ async def start_automation(request: StartAutomationRequest):
             # Frontend-supplied credentials (do not rely on backend .env)
             'linkedin_email': linkedin_email,
             'linkedin_password': linkedin_password,
+            # Add resume and user profile if provided
+            'resume_path': request.resume_path,
+            'user_profile': request.user_profile or {},
         }
         
         # Store task
@@ -240,6 +247,9 @@ async def apply_single_job(request: ApplySingleRequest):
             'dry_run': getattr(request, 'dry_run', True),
             'linkedin_email': linkedin_email,
             'linkedin_password': linkedin_password,
+            # Add resume and user profile if provided
+            'resume_path': request.resume_path,
+            'user_profile': request.user_profile or {},
         }
 
         bot = AutoAgentHireBot(config)

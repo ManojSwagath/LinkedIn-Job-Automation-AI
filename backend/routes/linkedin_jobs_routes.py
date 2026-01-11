@@ -86,7 +86,10 @@ async def get_recommended_jobs(payload: RecommendedJobsRequest):
             job_dict = {
                 "job_id": job.get("url", ""),
                 "title": job.get("title", ""),
-                "description": job.get("title", "") + " " + job.get("company", ""),  # Combine for better matching
+                # LinkedIn recommended jobs scraping doesn't provide full job descriptions reliably.
+                # Keep this empty to prevent the production filter from applying description-based
+                # skill checks on synthetic placeholders.
+                "description": "",
                 "company": job.get("company", "Unknown Company"),
                 "location": job.get("location", "Unknown Location"),
                 "posted_date": datetime.now() - timedelta(days=1),  # LinkedIn recommendations are recent

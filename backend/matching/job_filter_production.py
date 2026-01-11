@@ -206,13 +206,16 @@ ROLE_TAXONOMY = {
         "must_have_titles": [
             "backend engineer",
             "backend developer",
+            "backend software engineer",
+            "software engineer backend",
+            "software engineer - backend",
+            "software engineer, backend",
             "server engineer",
             "api engineer"
         ],
-        "must_have_skills": [
-            "backend",
-            "server"
-        ],
+        # NOTE: LinkedIn "recommended jobs" scraping doesn't provide job descriptions,
+        # so requiring skills here will wrongly filter out valid backend roles.
+        "must_have_skills": [],
         "optional_skills": [
             "api", "rest", "graphql", "microservices",
             "database", "sql", "python", "java", "golang",
@@ -356,6 +359,11 @@ def hard_filter_job(job: Dict[str, Any], role_key: str) -> Tuple[bool, str]:
     
     title = job.get("title", "").lower()
     description = job.get("description", "").lower()
+
+    # LinkedIn "recommended jobs" scraping often lacks a full description.
+    # In that case, relying on skill matches will incorrectly reject almost all jobs.
+    # We treat a description as "missing" if it's empty or looks like a synthetic placeholder.
+    has_real_description = bool(description.strip()) and description.strip() != title.strip()
     
     # ❌ FILTER 1: Exclude titles (fastest rejection)
     for exclude in role_config["exclude_titles"]:
@@ -373,17 +381,19 @@ def hard_filter_job(job: Dict[str, Any], role_key: str) -> Tuple[bool, str]:
         return False, "Title doesn't match required role titles"
     
     # ✅ FILTER 4: Required skills in description
-    for skill in role_config["must_have_skills"]:
-        if skill not in description:
-            return False, f"Missing required skill: '{skill}'"
+    if has_real_description:
+        for skill in role_config["must_have_skills"]:
+            if skill not in description:
+                return False, f"Missing required skill: '{skill}'"
     
     # ✅ FILTER 5: Optional skills (at least 2)
-    optional_match_count = sum(
-        1 for skill in role_config["optional_skills"]
-        if skill in description
-    )
-    if optional_match_count < 2:
-        return False, f"Only {optional_match_count}/2+ optional skills matched"
+    if has_real_description:
+        optional_match_count = sum(
+            1 for skill in role_config["optional_skills"]
+            if skill in description
+        )
+        if optional_match_count < 2:
+            return False, f"Only {optional_match_count}/2+ optional skills matched"
     
     return True, "Passed all hard filters"
 

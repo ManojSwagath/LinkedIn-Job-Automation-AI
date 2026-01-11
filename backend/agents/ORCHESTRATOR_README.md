@@ -4,14 +4,234 @@
 
 **Production-grade multi-agent system for autonomous LinkedIn job applications.**
 
-This orchestration layer coordinates 5 specialized AI agents that work together to:
+This orchestration layer coordinates specialized AI agents that work together to:
 1. Parse resumes with AI
 2. Search LinkedIn for jobs
 3. Match jobs using semantic similarity (RAG + embeddings)
 4. Auto-apply to qualified positions
 5. Generate comprehensive reports
 
-## 🏗️ Architecture
+## 🆕 LangGraph Architecture (Recommended)
+
+**New in 2025**: We now use **LangGraph** for improved state management, visualization, and debugging.
+
+### LangGraph Benefits
+- ✅ **Stateful Workflows**: Clean state management across nodes
+- ✅ **Visualization**: Built-in graph visualization
+- ✅ **Checkpointing**: Save and resume long-running workflows
+- ✅ **Debugging**: Inspect state at each step
+- ✅ **Maintainability**: Clear separation of concerns
+
+### LangGraph Workflow
+
+```
+                    START
+                      │
+                      ▼
+         ┌──────────────────────────────────────────┐
+         │   1. RESUME PARSING NODE                 │
+         │   - Extract skills from resume            │
+         │   - Calculate experience years            │
+         │   - Build structured resume data          │
+         └──────────────────────────────────────────┘
+                      │
+                      ▼
+         ┌──────────────────────────────────────────┐
+         │   2. JOB SEARCH NODE                     │
+         │   - Search for matching jobs              │
+         │   - Filter by location & role             │
+         │   - Return job listings                   │
+         └──────────────────────────────────────────┘
+                      │
+                      ▼
+         ┌──────────────────────────────────────────┐
+         │   3. JOB MATCHING NODE                   │
+         │   - Calculate match scores                │
+         │   - Rank by compatibility                 │
+         │   - Filter by salary/preferences          │
+         └──────────────────────────────────────────┘
+                      │
+                      ▼
+         ┌──────────────────────────────────────────┐
+         │   4. APPLICATION NODE                    │
+         │   - Submit applications (or dry-run)      │
+         │   - Track successes/errors                │
+         │   - Return final results                  │
+         └──────────────────────────────────────────┘
+                      │
+                      ▼
+                     END
+```
+
+## 🚀 Quick Start (LangGraph)
+
+### 1. Run via API
+
+```bash
+curl -X POST http://localhost:8000/api/agent/langgraph/run \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "user_123",
+    "resume_text": "Experienced ML Engineer with Python, PyTorch...",
+    "target_roles": ["machine_learning_engineer"],
+    "desired_locations": ["San Francisco, CA", "Remote"],
+    "min_salary": 150000,
+    "max_applications": 10,
+    "dry_run": true
+  }'
+```
+
+### 2. Run via Python
+
+```python
+from backend.agents.langgraph_orchestrator import get_orchestrator
+from backend.agents.graph_state import AgentInput
+
+# Prepare input
+input_data: AgentInput = {
+    "user_id": "user_123",
+    "resume_text": "ML Engineer with PyTorch, NLP, Python...",
+    "target_roles": ["machine_learning_engineer"],
+    "desired_locations": ["Remote"],
+    "max_applications": 10,
+    "dry_run": True
+}
+
+# Run workflow
+orchestrator = get_orchestrator()
+result = orchestrator.run_sync(input_data)
+
+print(f"✅ Jobs found: {result['total_jobs_found']}")
+print(f"✅ Applications: {result['applications_submitted']}")
+```
+
+### 3. Health Check
+
+```bash
+curl http://localhost:8000/api/agent/langgraph/health
+```
+
+## 📁 File Structure
+
+```
+backend/agents/
+├── langgraph_orchestrator.py    # Main LangGraph orchestrator
+├── graph_state.py                # State schema (TypedDict)
+├── nodes/                        # Individual workflow nodes
+│   ├── __init__.py
+│   ├── resume_parser.py          # Resume parsing node
+│   ├── job_search.py             # Job search node
+│   ├── job_matching.py           # Matching & ranking node
+│   └── application.py            # Application submission node
+├── multi_agent_orchestrator.py  # Legacy sequential orchestrator
+└── ORCHESTRATOR_README.md        # This file
+```
+
+## 🧪 Testing
+
+Run the test suite:
+
+```bash
+cd /path/to/LinkedIn-Job-Automation-with-AI
+source venv/bin/activate
+python tests/test_langgraph_orchestrator.py
+```
+
+Expected output:
+```
+🧪 LANGGRAPH ORCHESTRATOR - TEST SUITE
+✅ Graph compiled successfully
+✅ Workflow executed successfully
+✅ ALL TESTS PASSED!
+```
+
+## 🔧 Extending the Workflow
+
+### Add a New Node
+
+1. **Create node function** in `backend/agents/nodes/`:
+
+```python
+# backend/agents/nodes/my_custom_node.py
+from typing import Dict, Any
+from backend.agents.graph_state import AgentState
+import logging
+
+logger = logging.getLogger(__name__)
+
+def my_custom_node(state: AgentState) -> Dict[str, Any]:
+    """Process custom logic"""
+    logger.info("[MyCustomNode] Processing...")
+    
+    # Read from state
+    user_id = state.get("user_id")
+    
+    # Do processing...
+    result = process_data(state)
+    
+    # Return state updates
+    return {
+        "my_custom_field": result,
+        "current_step": "custom_node_completed",
+    }
+```
+
+2. **Add to orchestrator** in `langgraph_orchestrator.py`:
+
+```python
+from backend.agents.nodes.my_custom_node import my_custom_node
+
+def _build_graph(self) -> StateGraph:
+    workflow = StateGraph(AgentState)
+    
+    # Add your node
+    workflow.add_node("my_custom_node", my_custom_node)
+    
+    # Wire it into the workflow
+    workflow.add_edge("job_matching", "my_custom_node")
+    workflow.add_edge("my_custom_node", "application")
+    
+    return workflow
+```
+
+3. **Update state schema** if needed in `graph_state.py`:
+
+```python
+class AgentState(TypedDict, total=False):
+    # ... existing fields ...
+    my_custom_field: Optional[str]  # Add your field
+```
+
+## 🐛 Debugging
+
+### Enable Debug Logging
+
+```python
+import logging
+logging.basicConfig(level=logging.DEBUG)
+```
+
+### Inspect State at Each Step
+
+The workflow automatically logs state transitions. Check logs:
+
+```
+[ResumeParserNode] Extracted 15 skills
+[JobSearchNode] Found 25 jobs
+[JobMatchingNode] Top match score: 87.5%
+[ApplicationNode] Applied to 10 jobs
+```
+
+### Visualize the Graph
+
+```python
+orchestrator = get_orchestrator()
+orchestrator.visualize()  # Generates workflow_graph.png
+```
+
+## 🏗️ Legacy Architecture (Classic Orchestrator)
+
+The original `MultiAgentOrchestrator` is still available for backwards compatibility:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐

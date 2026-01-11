@@ -579,7 +579,8 @@ npm run dev -- --port 8081
 ### API Key errors
 - Verify your API key is correct and active
 - Check if you've exceeded rate limits
-- Try a different AI provider
+- Try 
+-a different AI provider
 
 ### LinkedIn automation issues
 - Ensure you're using correct credentials

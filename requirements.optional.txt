@@ -1,0 +1,25 @@
+# Optional / heavyweight dependencies
+# Install these only if you need the corresponding features.
+#
+#   source venv/bin/activate
+#   pip install -r requirements.optional.txt
+
+# Web automation (heavy browser deps)
+selenium==4.16.0
+playwright==1.41.0
+undetected-chromedriver==3.5.4
+
+# Vector DB / embeddings (can be slow to resolve/build on Python 3.13)
+chromadb==0.4.22
+pinecone-client==6.0.0
+sentence-transformers==2.3.1
+faiss-cpu==1.9.0.post1
+
+# Streamlit dashboard (conflicts with LangChain packaging on some versions)
+streamlit==1.30.0
+plotly==5.18.0
+Pillow==10.4.0
+
+# NLP extras
+spacy==3.7.2
+transformers==4.37.0

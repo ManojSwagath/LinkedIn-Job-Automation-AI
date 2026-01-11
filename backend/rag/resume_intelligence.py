@@ -1,7 +1,17 @@
 """
 Resume Intelligence Module with RAG & Embeddings
 ================================================
-Implements semantic resume parsing, embeddings generation, and job matching using FAISS.
+Impl        logger.info(f"📄 Parsing resume: {file_path_obj.name}")
+        
+        # Extract text based on file type
+        if file_path_obj.suffix.lower() == '.pdf':
+            raw_text = self._extract_text_from_pdf(file_path_obj)
+        elif file_path_obj.suffix.lower() in ['.docx', '.doc']:
+            raw_text = self._extract_text_from_docx(file_path_obj)
+        elif file_path_obj.suffix.lower() == '.txt':
+            raw_text = file_path_obj.read_text(encoding='utf-8')
+        else:
+            raise ValueError(f"Unsupported file type: {file_path_obj.suffix}")ntic resume parsing, embeddings generation, and job matching using FAISS.
 
 Features:
 - PDF/DOCX resume parsing
@@ -100,21 +110,21 @@ class ResumeIntelligence:
         Returns:
             ResumeData: Structured resume data
         """
-        file_path = Path(file_path)
-        if not file_path.exists():
-            raise FileNotFoundError(f"Resume file not found: {file_path}")
+        file_path_obj = Path(file_path)
+        if not file_path_obj.exists():
+            raise FileNotFoundError(f"Resume file not found: {file_path_obj}")
         
-        logger.info(f"📄 Parsing resume: {file_path.name}")
+        logger.info(f"📄 Parsing resume: {file_path_obj.name}")
         
         # Extract text based on file type
-        if file_path.suffix.lower() == '.pdf':
-            raw_text = self._extract_text_from_pdf(file_path)
-        elif file_path.suffix.lower() in ['.docx', '.doc']:
-            raw_text = self._extract_text_from_docx(file_path)
-        elif file_path.suffix.lower() == '.txt':
-            raw_text = file_path.read_text(encoding='utf-8')
+        if file_path_obj.suffix.lower() == '.pdf':
+            raw_text = self._extract_text_from_pdf(file_path_obj)
+        elif file_path_obj.suffix.lower() in ['.docx', '.doc']:
+            raw_text = self._extract_text_from_docx(file_path_obj)
+        elif file_path_obj.suffix.lower() == '.txt':
+            raw_text = file_path_obj.read_text(encoding='utf-8')
         else:
-            raise ValueError(f"Unsupported file type: {file_path.suffix}")
+            raise ValueError(f"Unsupported file type: {file_path_obj.suffix}")
         
         logger.info(f"✅ Extracted {len(raw_text)} characters from resume")
         
@@ -149,7 +159,7 @@ class ResumeIntelligence:
     def _extract_text_from_docx(self, file_path: Path) -> str:
         """Extract text from DOCX file"""
         try:
-            doc = docx.Document(file_path)
+            doc = docx.Document(str(file_path))
             text = "\n".join([para.text for para in doc.paragraphs])
             return text.strip()
         except Exception as e:
@@ -206,6 +216,7 @@ Return ONLY a valid JSON object with these exact keys:
 }}
 """
         
+        response_text = ""  # Initialize to avoid "possibly unbound" error
         try:
             response = self.client.chat.completions.create(
                 model=self.llm_model,
@@ -218,7 +229,7 @@ Return ONLY a valid JSON object with these exact keys:
             )
             
             # Parse JSON response
-            response_text = response.choices[0].message.content.strip()
+            response_text = (response.choices[0].message.content or "{}").strip()
             
             # Remove markdown code blocks if present
             if response_text.startswith("```json"):
@@ -228,7 +239,8 @@ Return ONLY a valid JSON object with these exact keys:
             if response_text.endswith("```"):
                 response_text = response_text[:-3]
             
-            parsed_data = json.loads(response_text.strip())
+            response_text = response_text.strip()
+            parsed_data = json.loads(response_text)
             
             # Create ResumeData object
             resume_data = ResumeData(
@@ -253,8 +265,9 @@ Return ONLY a valid JSON object with these exact keys:
             return resume_data
             
         except json.JSONDecodeError as e:
+            response_preview = response_text[:200] if 'response_text' in locals() else "N/A"
             logger.error(f"❌ JSON parsing failed: {e}")
-            logger.error(f"Response: {response_text[:200]}")
+            logger.error(f"Response: {response_preview}")
             raise
         except Exception as e:
             logger.error(f"❌ LLM parsing failed: {e}")
@@ -304,7 +317,8 @@ Return ONLY a valid JSON object with these exact keys:
         self.index = faiss.IndexFlatIP(self.dimension)
         
         # Add resume embedding
-        self.index.add(np.array([self.resume_data.embedding]))
+        resume_embedding_array = np.array([self.resume_data.embedding], dtype=np.float32)
+        self.index.add(resume_embedding_array)  # type: ignore[call-arg]
         
         logger.info("✅ FAISS index initialized")
     
@@ -340,8 +354,11 @@ Return ONLY a valid JSON object with these exact keys:
         job_embedding = self._generate_embedding(job_description)
         
         # Compute similarity using FAISS
-        job_embedding_2d = np.array([job_embedding])
-        distances, indices = self.index.search(job_embedding_2d, k=1)
+        job_embedding_2d = np.array([job_embedding], dtype=np.float32)
+        if self.index is not None:
+            distances, indices = self.index.search(job_embedding_2d, k=1)  # type: ignore[call-arg]
+        else:
+            raise ValueError("FAISS index not initialized")
         
         # Convert distance to similarity score (0-100%)
         similarity = float(distances[0][0])  # Inner product gives cosine similarity
@@ -440,8 +457,8 @@ Return ONLY a valid JSON object with these exact keys:
         if not self.resume_data:
             raise ValueError("No resume data to save")
         
-        output_path = Path(output_path)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path_obj = Path(output_path)
+        output_path_obj.parent.mkdir(parents=True, exist_ok=True)
         
         # Convert to dict for JSON serialization
         data_dict = asdict(self.resume_data)
@@ -450,10 +467,10 @@ Return ONLY a valid JSON object with these exact keys:
         if self.resume_data.embedding is not None:
             data_dict['embedding'] = self.resume_data.embedding.tolist()
         
-        with open(output_path, 'w') as f:
+        with open(str(output_path_obj), 'w') as f:
             json.dump(data_dict, f, indent=2)
         
-        logger.info(f"💾 Saved resume data to {output_path}")
+        logger.info(f"💾 Saved resume data to {output_path_obj}")
     
     def load_resume_data(self, input_path: str) -> ResumeData:
         """Load parsed resume data from file"""
