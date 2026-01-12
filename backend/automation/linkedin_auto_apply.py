@@ -32,6 +32,9 @@ import PyPDF2
 from playwright.async_api import async_playwright, Page, Browser, BrowserContext
 from dotenv import load_dotenv
 
+from backend.automation.application_handler import ApplicationHandler
+from backend.automation.intelligent_form_filler import IntelligentFormFiller
+
 # Load environment variables
 load_dotenv()
 
@@ -341,14 +344,47 @@ class LinkedInAutoApply:
             # Click login button
             logger.info("👆 Clicking login button...")
             await self.page.click('button[type="submit"]')
-            
-            # Wait for navigation
-            await self.page.wait_for_load_state('networkidle', timeout=15000)
-            await self.human_delay(3, 5)
-            
-            # Check if login successful
+
+            # LinkedIn often keeps network connections open; `networkidle` can hang.
+            # Instead: wait for a clear post-login signal (URL or a nav/search UI),
+            # or detect the security checkpoint.
+            await self.human_delay(1.0, 2.0)
+
+            async def _is_logged_in() -> bool:
+                if not self.page:
+                    return False
+                url = self.page.url
+                if any(p in url for p in ('/feed', '/mynetwork', '/jobs', '/in/')):
+                    return True
+                # Common UI markers for authenticated state
+                selectors = [
+                    'input[placeholder*="Search"]',
+                    'a[href*="/feed/"]',
+                    'a[href*="/jobs/"]',
+                    'nav[aria-label="Primary"]',
+                ]
+                for sel in selectors:
+                    try:
+                        if await self.page.query_selector(sel):
+                            return True
+                    except Exception:
+                        continue
+                return False
+
+            # Wait up to 45s for either logged-in state or a challenge to appear.
+            deadline = asyncio.get_event_loop().time() + 45.0
+            while asyncio.get_event_loop().time() < deadline:
+                current_url = self.page.url
+                if 'checkpoint/challenge' in current_url:
+                    break
+                if await _is_logged_in():
+                    logger.info("✅ Successfully logged into LinkedIn!")
+                    return True
+                await asyncio.sleep(1)
+
+            # Check if login successful or challenge detected
             current_url = self.page.url
-            if 'feed' in current_url or 'mynetwork' in current_url:
+            if await _is_logged_in():
                 logger.info("✅ Successfully logged into LinkedIn!")
                 return True
             elif 'checkpoint/challenge' in current_url:
@@ -770,36 +806,34 @@ class LinkedInAutoApply:
             return result
         
         try:
-            # Navigate to job if not already there
-            if self.page.url != job.apply_link:
-                await self.page.goto(job.apply_link, wait_until='domcontentloaded')
-                await self.human_delay(2, 3)
-            
-            # Look for Easy Apply button
-            easy_apply_button = await self.page.query_selector('button:has-text("Easy Apply")')
-            
-            if not easy_apply_button:
-                logger.warning(f"⚠️ No Easy Apply button found for {job.title}")
+            # Open application using robust handler (navigation + click + modal wait)
+            application_handler = ApplicationHandler(self.page)
+            open_result = await application_handler.open_job_application(job.apply_link)
+            if open_result.get('status') != 'SUCCESS':
                 result.status = 'skipped'
-                result.error_message = 'No Easy Apply available'
+                result.error_message = open_result.get('reason', 'Failed to open application')
                 return result
+
+            # Fill the whole form using IntelligentFormFiller
+            user_profile = {
+                'email': self.email,
+                'first_name': os.getenv('FIRST_NAME', ''),
+                'last_name': os.getenv('LAST_NAME', ''),
+                'phone_number': os.getenv('PHONE_NUMBER', ''),
+                'city': os.getenv('CITY', ''),
+                'linkedin_url': os.getenv('LINKEDIN_URL', ''),
+                'github_url': os.getenv('GITHUB_URL', ''),
+                'website': os.getenv('PORTFOLIO_URL', ''),
+                'requires_sponsorship': os.getenv('REQUIRES_SPONSORSHIP', 'No'),
+            }
+            form_filler = IntelligentFormFiller(self.page, user_profile=user_profile, resume_text=self.resume_text)
+            await form_filler.fill_application_form()
+
+            # Advance through Easy Apply stages (Next/Review/Submit)
+            await self._complete_easy_apply_flow()
             
-            # Click Easy Apply button
-            await easy_apply_button.click()
-            await self.human_delay(2, 3)
-            
-            # Fill application form
-            await self._fill_application_form(job)
-            
-            # Generate and add cover letter if enabled
-            if self.use_llm:
-                cover_letter = await self.generate_cover_letter(job)
-                if cover_letter:
-                    await self._add_cover_letter(cover_letter)
-                    result.cover_letter_generated = True
-            
-            # Submit application
-            await self._submit_application()
+            # NOTE: cover letter generation can be inserted into the flow if a field exists.
+            # Many LinkedIn Easy Apply flows do not include a cover letter textarea.
             
             result.status = 'success'
             logger.info(f"✅ Successfully applied to {job.title}")
@@ -810,6 +844,83 @@ class LinkedInAutoApply:
             result.error_message = str(e)
         
         return result
+
+    async def _complete_easy_apply_flow(self, max_steps: int = 12):
+        """Complete the Easy Apply modal by clicking Next/Review/Submit as they appear."""
+        if not self.page:
+            raise Exception("Browser not initialized")
+
+        page = self.page
+
+        # Common button labels / aria-labels seen in Easy Apply
+        next_selectors = [
+            'button[aria-label*="Continue" i]',
+            'button[aria-label*="Next" i]',
+            'button:has-text("Next")',
+            'button:has-text("Continue")',
+        ]
+        review_selectors = [
+            'button[aria-label*="Review" i]',
+            'button:has-text("Review")',
+            'button:has-text("Preview")',
+        ]
+        submit_selectors = [
+            'button[aria-label*="Submit application" i]',
+            'button:has-text("Submit application")',
+            'button:has-text("Submit")',
+        ]
+
+        async def _first_clickable(selectors):
+            for sel in selectors:
+                try:
+                    el = await page.query_selector(sel)
+                    if not el:
+                        continue
+                    if not await el.is_visible():
+                        continue
+                    if not await el.is_enabled():
+                        continue
+                    return el
+                except Exception:
+                    continue
+            return None
+
+        for _ in range(max_steps):
+            # If a security challenge appears, stop.
+            url_lower = (self.page.url or '').lower()
+            if 'checkpoint/challenge' in url_lower or 'captcha' in url_lower:
+                raise Exception("Security challenge detected; cannot proceed automatically")
+
+            # Try submit first (end condition)
+            submit_btn = await _first_clickable(submit_selectors)
+            if submit_btn:
+                logger.info("✉️ Submitting application...")
+                await submit_btn.click()
+                await self.human_delay(2, 4)
+                logger.info("✅ Application submitted")
+                return
+
+            # Then review/preview
+            review_btn = await _first_clickable(review_selectors)
+            if review_btn:
+                logger.info("➡️ Clicking Review/Preview...")
+                await review_btn.click()
+                await self.human_delay(1.5, 3)
+                # Fill any newly revealed fields after review step
+                await IntelligentFormFiller(self.page, user_profile={'email': self.email}, resume_text=self.resume_text).fill_application_form()
+                continue
+
+            # Then next/continue
+            next_btn = await _first_clickable(next_selectors)
+            if next_btn:
+                logger.info("➡️ Clicking Next/Continue...")
+                await next_btn.click()
+                await self.human_delay(1.5, 3)
+                await IntelligentFormFiller(self.page, user_profile={'email': self.email}, resume_text=self.resume_text).fill_application_form()
+                continue
+
+            # If we can't find any progression button, we stop with a clear error
+            raise Exception("Could not find Next/Review/Submit button in Easy Apply modal")
     
     async def _fill_application_form(self, job: JobListing):
         """Fill out the Easy Apply application form."""

@@ -52,7 +52,10 @@ alembic==1.13.1
 # psycopg2-binary fails to build on some Python 3.13 macOS setups without pg_config.
 # psycopg provides prebuilt wheels and is the recommended modern driver.
 psycopg[binary]==3.2.5
-asyncpg==0.29.0
+# asyncpg requires a native build and often fails on newer Python/macOS environments.
+# It's only needed for async PostgreSQL usage; default app uses SQLite.
+# Install manually if you intend to use async Postgres.
+# asyncpg==0.29.0
 redis==5.0.1
 
 # Data Validation & Serialization

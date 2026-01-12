@@ -125,15 +125,15 @@ async def check_gemini_api():
     
     try:
         import google.generativeai as genai
-        genai.configure(api_key=gemini_key)
-        print("✅ Gemini SDK configured")
+        print("✅ Gemini SDK installed")
+        # Note: Configuration will be done when actually using the API
         return True
     except ImportError:
         print("⚠️  Google Generative AI SDK not installed")
         print("   Install with: pip install google-generativeai")
         return False
     except Exception as e:
-        print(f"⚠️  Gemini configuration error: {str(e)}")
+        print(f"⚠️  Gemini import error: {str(e)}")
         return False
 
 async def check_database():

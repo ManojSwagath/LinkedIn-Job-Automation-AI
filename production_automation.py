@@ -24,6 +24,14 @@ from backend.llm.cover_letter_generator import get_cover_letter_generator
 from backend.utils.qdrant_helper import QdrantHelper
 
 
+def _require_page(bot: AutoAgentHireBot):
+    """Return bot.page or raise a clear error if browser/page wasn't initialized."""
+    page = getattr(bot, "page", None)
+    if page is None:
+        raise RuntimeError("Browser page is not initialized. Call initialize() first.")
+    return page
+
+
 class ProductionAutomationBot:
     """
     Production-ready automation bot with all enhancements integrated
@@ -68,10 +76,18 @@ class ProductionAutomationBot:
         print(f"🔗 Job URL: {job_url}")
         print(f"{'='*60}\n")
         
+        job_details: Dict = {
+            'title': 'Unknown',
+            'company': 'Unknown',
+            'description': '',
+            'url': job_url,
+        }
+
         try:
+            page = _require_page(self.base_bot)
             # Step 1: Navigate to job page
             print("📍 Step 1: Opening job page...")
-            await self.base_bot.page.goto(job_url, wait_until='domcontentloaded', timeout=30000)
+            await page.goto(job_url, wait_until='domcontentloaded', timeout=30000)
             await asyncio.sleep(2)
             
             # Step 2: Extract job details
@@ -82,7 +98,7 @@ class ProductionAutomationBot:
             
             # Step 3: Use enhanced application handler to open application
             print("📍 Step 3: Opening Easy Apply form (enhanced)...")
-            app_handler = ApplicationHandler(self.base_bot.page)
+            app_handler = ApplicationHandler(page)
             open_result = await app_handler.open_job_application(job_url)
             
             if open_result['status'] != 'SUCCESS':
@@ -136,7 +152,7 @@ class ProductionAutomationBot:
             # Step 6: Fill form with intelligent defaults
             print("📍 Step 6: Filling application form with intelligent defaults...")
             form_filler = IntelligentFormFiller(
-                page=self.base_bot.page,
+                page=page,
                 user_profile=self.config.get('user_profile', {}),
                 resume_text=self.base_bot.resume_text
             )
@@ -202,11 +218,12 @@ class ProductionAutomationBot:
     
     async def _extract_job_details(self) -> Dict:
         """Extract job details from page"""
+        page = _require_page(self.base_bot)
         job_details = {
             'title': 'Unknown',
             'company': 'Unknown',
             'description': '',
-            'url': self.base_bot.page.url
+            'url': page.url
         }
         
         try:
@@ -214,7 +231,7 @@ class ProductionAutomationBot:
             title_selectors = ['h1.t-24', 'h1.job-title', '.job-details-jobs-unified-top-card__job-title']
             for selector in title_selectors:
                 try:
-                    elem = await self.base_bot.page.query_selector(selector)
+                    elem = await page.query_selector(selector)
                     if elem:
                         job_details['title'] = (await elem.inner_text()).strip()
                         break
@@ -229,7 +246,7 @@ class ProductionAutomationBot:
             ]
             for selector in company_selectors:
                 try:
-                    elem = await self.base_bot.page.query_selector(selector)
+                    elem = await page.query_selector(selector)
                     if elem:
                         job_details['company'] = (await elem.inner_text()).strip()
                         break
@@ -238,7 +255,7 @@ class ProductionAutomationBot:
             
             # Description
             try:
-                desc_elem = await self.base_bot.page.query_selector('.jobs-description')
+                desc_elem = await page.query_selector('.jobs-description')
                 if desc_elem:
                     job_details['description'] = (await desc_elem.inner_text()).strip()[:2000]
             except:
@@ -252,7 +269,8 @@ class ProductionAutomationBot:
     async def _fill_cover_letter_field(self, cover_letter: str):
         """Fill cover letter textarea if present"""
         try:
-            textareas = await self.base_bot.page.query_selector_all('textarea')
+            page = _require_page(self.base_bot)
+            textareas = await page.query_selector_all('textarea')
             
             for textarea in textareas:
                 try:
@@ -260,7 +278,7 @@ class ProductionAutomationBot:
                     label = ""
                     field_id = await textarea.get_attribute('id')
                     if field_id:
-                        label_elem = await self.base_bot.page.query_selector(f'label[for="{field_id}"]')
+                        label_elem = await page.query_selector(f'label[for="{field_id}"]')
                         if label_elem:
                             label = (await label_elem.inner_text()).lower()
                     

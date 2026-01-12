@@ -41,8 +41,13 @@ class IntelligentFormFiller:
         
         # Extract phone number
         phone_match = re.search(r'\b\d{3}[-.]?\d{3}[-.]?\d{4}\b', self.resume_text)
-        if phone_match and 'phone' not in self.user_profile:
-            self.user_profile['phone'] = phone_match.group(0)
+        if phone_match:
+            # Normalize to the key used across the project
+            if 'phone_number' not in self.user_profile:
+                self.user_profile['phone_number'] = phone_match.group(0)
+            # Back-compat for any code that still expects 'phone'
+            if 'phone' not in self.user_profile:
+                self.user_profile['phone'] = phone_match.group(0)
         
         # Extract LinkedIn profile URL
         linkedin_match = re.search(r'linkedin\.com/in/[\w-]+', self.resume_text, re.IGNORECASE)
@@ -78,6 +83,18 @@ class IntelligentFormFiller:
             'sponsorship': {
                 'patterns': ['require sponsorship', 'need sponsorship', 'visa sponsorship'],
                 'answer': self.user_profile.get('requires_sponsorship', 'No')
+            },
+
+            # Will you now or in the future require sponsorship?
+            'sponsorship_future': {
+                'patterns': ['now or in the future require sponsorship', 'future sponsorship', 'require visa sponsorship'],
+                'answer': self.user_profile.get('requires_sponsorship', 'No')
+            },
+
+            # Are you at least 18 years old?
+            'age_18_plus': {
+                'patterns': ['at least 18', '18 years old', 'over 18'],
+                'answer': 'Yes'
             },
             
             # Years of experience
@@ -467,7 +484,7 @@ class IntelligentFormFiller:
         elif 'email' in label_lower:
             return self.user_profile.get('email', '')
         elif 'phone' in label_lower:
-            return self.user_profile.get('phone', '')
+            return self.user_profile.get('phone_number', '') or self.user_profile.get('phone', '')
         elif 'city' in label_lower or 'location' in label_lower:
             return self.user_profile.get('city', '')
         elif 'linkedin' in label_lower and 'url' in label_lower:

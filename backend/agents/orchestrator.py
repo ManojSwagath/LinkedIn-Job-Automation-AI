@@ -76,7 +76,9 @@ class AgentOrchestrator:
             "auto_apply": auto_apply,
             "max_jobs": max_applications,  # How many to apply to
             "max_results": max_jobs,  # How many to search
-            "similarity_threshold": similarity_threshold
+            "similarity_threshold": similarity_threshold,
+            # Pass full user profile through for form auto-fill
+            "user_profile": search_criteria.get("user_profile", {})
         }
         
         # Set credentials in environment for bot to use

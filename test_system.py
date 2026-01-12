@@ -4,17 +4,23 @@ Quick test to verify system is running correctly
 """
 import requests
 import time
+import socket
 
 def test_backend():
     """Test if backend is responding"""
     try:
-        response = requests.get("http://127.0.0.1:8000/api/health", timeout=5)
-        if response.status_code == 200:
-            print("✅ Backend API is running and healthy")
-            return True
-        else:
-            print(f"⚠️  Backend responded with status: {response.status_code}")
-            return False
+        for _ in range(3):
+            try:
+                response = requests.get("http://127.0.0.1:8000/api/health", timeout=2)
+                if response.status_code == 200:
+                    print("✅ Backend API is running and healthy")
+                    return True
+                print(f"⚠️  Backend responded with status: {response.status_code}")
+                return False
+            except requests.exceptions.ReadTimeout:
+                time.sleep(1)
+        print("❌ Backend is not responding (timed out)")
+        return False
     except requests.exceptions.ConnectionError:
         print("❌ Backend is not responding (connection refused)")
         return False
@@ -25,13 +31,20 @@ def test_backend():
 def test_frontend():
     """Test if frontend is responding"""
     try:
-        response = requests.get("http://127.0.0.1:8080/", timeout=5)
-        if response.status_code == 200:
-            print("✅ Frontend UI is running")
-            return True
-        else:
-            print(f"⚠️  Frontend responded with status: {response.status_code}")
-            return False
+        # Vite can take time to respond to the first HTTP request (optimize/compile).
+        # For a readiness check, it's enough to confirm the port is accepting TCP connections.
+        for port in (8080, 8081):
+            for _ in range(5):
+                try:
+                    with socket.create_connection(("127.0.0.1", port), timeout=1.0):
+                        print(f"✅ Frontend UI is running (http://127.0.0.1:{port}/)")
+                        return True
+                except OSError:
+                    time.sleep(0.5)
+                    continue
+
+        print("❌ Frontend is not responding (connection refused)")
+        return False
     except requests.exceptions.ConnectionError:
         print("❌ Frontend is not responding (connection refused)")
         return False
@@ -89,7 +102,7 @@ def main():
         print("🎯 Access Points:")
         print("   Backend API: http://127.0.0.1:8000")
         print("   API Docs: http://127.0.0.1:8000/docs")
-        print("   Frontend UI: http://127.0.0.1:8080")
+        print("   Frontend UI: http://127.0.0.1:8080 or http://127.0.0.1:8081")
         print()
         print("🚀 Ready to run automation!")
     else:

@@ -110,7 +110,12 @@ Do NOT include address blocks or signature lines.
                 temperature=0.7
             )
             
-            cover_letter = response.choices[0].message.content.strip()
+            message_content = response.choices[0].message.content
+            if message_content is not None:
+                cover_letter = message_content.strip()
+            else:
+                print("⚠️  GPT-4o response content is None, using fallback cover letter.")
+                return self._generate_fallback_cover_letter(job_title, company_name, resume_text)
             
             # Limit length if needed
             if len(cover_letter) > max_length:

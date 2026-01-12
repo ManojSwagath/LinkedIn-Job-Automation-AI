@@ -17,16 +17,16 @@ class QdrantHelper:
         """Initialize Qdrant connection"""
         try:
             from qdrant_client import QdrantClient
-            from qdrant_client.models import Distance, VectorParams
         except ImportError:
-            print("❌ qdrant-client not installed. Installing...")
-            os.system("pip install qdrant-client")
-            from qdrant_client import QdrantClient
-            from qdrant_client.models import Distance, VectorParams
+            raise ImportError(
+                "qdrant-client not installed. Install with: pip install qdrant-client"
+            )
         
         self.qdrant_url = os.getenv("QDRANT_URL", "http://localhost:6333")
         self.qdrant_api_key = os.getenv("QDRANT_API_KEY", "")
-        self.collection_name = os.getenv("QDRANT_COLLECTION_NAME", "linkedin_jobs")
+        # The repo's initialization script creates these collections by default.
+        # Allow choosing which one to use, but default to 'jobs'.
+        self.collection_name = os.getenv("QDRANT_COLLECTION_NAME", "jobs")
         
         self.client = QdrantClient(
             url=self.qdrant_url,
@@ -46,17 +46,21 @@ class QdrantHelper:
             List[float]: Embedding vector
         """
         try:
-            import openai
-            openai.api_key = os.getenv("OPENAI_API_KEY")
-            
-            response = openai.Embedding.create(
-                model="text-embedding-3-small",
-                input=text
+            # Prefer a deterministic local embedding (384-dim) to match the
+            # collections created in initialize_system.py.
+            from sentence_transformers import SentenceTransformer
+
+            model_name = os.getenv(
+                "EMBEDDING_MODEL",
+                "sentence-transformers/all-MiniLM-L6-v2",
             )
-            return response['data'][0]['embedding']
+            model = SentenceTransformer(model_name)
+            vec = model.encode(text, normalize_embeddings=True)
+            return vec.tolist()
         except Exception as e:
             print(f"❌ Embedding error: {e}")
-            return [0] * 1536  # Return zero vector on error
+            # Return zero vector on error. Keep it 384-dim to match collections.
+            return [0.0] * 384
     
     def add_job(self, job_id: str, job_data: Dict, embedding: Optional[List[float]] = None):
         """
@@ -203,7 +207,7 @@ class QdrantHelper:
             from qdrant_client.models import Distance, VectorParams
             self.client.create_collection(
                 collection_name=self.collection_name,
-                vectors_config=VectorParams(size=1536, distance=Distance.COSINE)
+                vectors_config=VectorParams(size=384, distance=Distance.COSINE)
             )
             print(f"✅ Recreated collection: {self.collection_name}")
         except Exception as e:

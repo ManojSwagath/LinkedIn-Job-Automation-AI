@@ -761,7 +761,9 @@ async def execute_agent_workflow(data: Dict[str, Any]):
             "resume_path": data.get("resume_path", ""),
             "max_jobs": data.get("max_jobs", 15),
             "max_applications": data.get("max_applications", 5),
-            "similarity_threshold": data.get("similarity_threshold", 0.6)
+            "similarity_threshold": data.get("similarity_threshold", 0.6),
+            # IMPORTANT: pass through the full user profile for Easy Apply auto-fill
+            "user_profile": data.get("user_profile", {})
         }
         
         app_state.current_phase = "executing"
