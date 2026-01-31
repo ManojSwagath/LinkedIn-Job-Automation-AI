@@ -75,6 +75,11 @@ async def run_automation():
             print("⚠️ No Easy Apply jobs found. Try different keywords.")
             return
         
+        # Verify page is available
+        if not bot.page:
+            print("❌ Browser page not initialized!")
+            return
+        
         # Apply to jobs
         max_apps = min(config['max_applications'], len(jobs))
         print(f"\n🎯 Applying to {max_apps} jobs...")
@@ -100,6 +105,9 @@ async def run_automation():
                 
                 # Handle multi-step
                 for step in range(5):
+                    if not bot.page:
+                        break
+                        
                     next_btn = await bot.page.query_selector('button:has-text("Next")')
                     if next_btn:
                         print(f"   ➡️ Next (step {step+1})")
@@ -126,9 +134,10 @@ async def run_automation():
             except Exception as e:
                 print(f"   ❌ Error: {str(e)[:50]}")
                 try:
-                    close = await bot.page.query_selector('button[aria-label*="Dismiss"]')
-                    if close:
-                        await close.click()
+                    if bot.page:
+                        close = await bot.page.query_selector('button[aria-label*="Dismiss"]')
+                        if close:
+                            await close.click()
                 except:
                     pass
         
