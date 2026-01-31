@@ -107,6 +107,7 @@ screenshots/
 *.png
 *.jpg
 !docs/*.png
+browser_profile/
 
 # Jupyter Notebooks
 .ipynb_checkpoints

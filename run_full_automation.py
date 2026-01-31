@@ -61,7 +61,7 @@ async def run_automation():
         
         # Login
         print("🔐 Logging into LinkedIn...")
-        await bot.login_to_linkedin()
+        await bot.login_linkedin()
         
         # Search for jobs
         print(f"\n🔍 Searching: '{config['keywords']}' in '{config['location']}'...")
