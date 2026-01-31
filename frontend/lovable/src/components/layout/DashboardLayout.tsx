@@ -3,7 +3,7 @@ import { Link, Outlet, useLocation } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Bot, LayoutDashboard, FileText, Search, Briefcase, Settings, HelpCircle,
-  LogOut, Menu, X, Bell, ChevronDown, User, Star
+  LogOut, Menu, X, Bell, ChevronDown, User, Star, Play
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -11,6 +11,7 @@ const sidebarLinks = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { name: "Applications", href: "/dashboard/applications", icon: Briefcase },
   { name: "Job Search", href: "/dashboard/search", icon: Search },
+  { name: "Automation", href: "/dashboard/automation", icon: Play },
   { name: "Recommended Jobs", href: "/dashboard/recommended", icon: Star },
   { name: "ATS Checker", href: "/ats-checker", icon: FileText },
   { name: "Settings", href: "/dashboard/settings", icon: Settings },

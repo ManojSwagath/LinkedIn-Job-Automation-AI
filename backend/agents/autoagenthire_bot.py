@@ -13,6 +13,7 @@ from datetime import datetime
 from pathlib import Path
 
 from playwright.async_api import async_playwright, Page, Browser, BrowserContext
+from backend.automation.application_handler import ApplicationHandler
 import google.generativeai as genai  # type: ignore
 from PyPDF2 import PdfReader
 from dotenv import load_dotenv
@@ -587,9 +588,52 @@ class AutoAgentHireBot:
                     if len(jobs) >= max_jobs:
                         break
 
+                    # Close/dismiss any overlays that can intercept clicks (resume upload, dialogs, etc.)
+                    try:
+                        await self._dismiss_overlays()
+                    except Exception:
+                        pass
+
                     # Click to select job with error handling
                     try:
-                        await card.click()
+                        # Scroll card into view and click with fallback strategies to avoid interception
+                        await card.scroll_into_view_if_needed()
+                        await asyncio.sleep(0.2)
+                        clicked = False
+                        for attempt_click in range(3):
+                            try:
+                                await card.click(timeout=6000)
+                                clicked = True
+                                break
+                            except Exception:
+                                try:
+                                    await self._dismiss_overlays()
+                                except Exception:
+                                    pass
+                                await asyncio.sleep(0.3)
+
+                            try:
+                                await card.click(timeout=6000, force=True)
+                                clicked = True
+                                break
+                            except Exception:
+                                try:
+                                    await self._dismiss_overlays()
+                                except Exception:
+                                    pass
+                                await asyncio.sleep(0.3)
+
+                            # Last resort: JS click
+                            try:
+                                await card.evaluate("el => el.click()")
+                                clicked = True
+                                break
+                            except Exception:
+                                await asyncio.sleep(0.3)
+
+                        if not clicked:
+                            raise Exception("Unable to click job card after retries")
+
                         await asyncio.sleep(random.uniform(1, 2))
                     except Exception as click_error:
                         print(f"⚠️  Could not click job card {i+1}: {str(click_error)}")
@@ -650,8 +694,51 @@ class AutoAgentHireBot:
                         except:
                             continue
 
-                    # Get job URL
-                    url = self.page.url
+                    # Get job URL (prefer card link, fallback to detail panel / current URL)
+                    url = None
+                    card_link_selectors = [
+                        'a.job-card-list__title',
+                        'a.job-card-container__link',
+                        'a.job-card-list__title-link',
+                        'a.job-card-list__title--link',
+                        'a[href*="/jobs/view/"]',
+                    ]
+
+                    for selector in card_link_selectors:
+                        try:
+                            link = await card.query_selector(selector)
+                            if link:
+                                href = await link.get_attribute('href')
+                                if href:
+                                    url = href
+                                    break
+                        except Exception:
+                            continue
+
+                    if not url:
+                        detail_link_selectors = [
+                            'a[data-control-name="jobdetails_topcard"]',
+                            'a[href*="/jobs/view/"]',
+                        ]
+                        for selector in detail_link_selectors:
+                            try:
+                                link = await self.page.query_selector(selector)
+                                if link:
+                                    href = await link.get_attribute('href')
+                                    if href:
+                                        url = href
+                                        break
+                            except Exception:
+                                continue
+
+                    if url:
+                        match = re.search(r"/jobs/view/\d+", url)
+                        if match:
+                            url = f"https://www.linkedin.com{match.group(0)}"
+                        elif url.startswith('/'):
+                            url = f"https://www.linkedin.com{url}"
+                    else:
+                        url = self.page.url
 
                     # Check for Easy Apply badge with multiple selectors
                     easy_apply = False
@@ -715,6 +802,40 @@ class AutoAgentHireBot:
             print(f"❌ Collection error occurred")
             self.errors.append("Job collection failed")
             return jobs
+
+    async def _dismiss_overlays(self) -> None:
+        """Best-effort: close LinkedIn overlays/modals that intercept pointer events."""
+        if not self.page:
+            return
+
+        close_selectors = [
+            'button[aria-label="Dismiss"]',
+            'button[aria-label*="Dismiss"]',
+            'button[aria-label="Close"]',
+            'button[aria-label*="Close"]',
+            'button[data-test-modal-close-btn]',
+            'button.artdeco-modal__dismiss',
+            'button.artdeco-toast-item__dismiss',
+        ]
+
+        for selector in close_selectors:
+            try:
+                buttons = await self.page.query_selector_all(selector)
+                for btn in buttons[:5]:
+                    try:
+                        if await btn.is_visible():
+                            await btn.click(force=True, timeout=1500)
+                            await asyncio.sleep(0.2)
+                    except Exception:
+                        continue
+            except Exception:
+                continue
+
+        # Escape key can dismiss some dialogs
+        try:
+            await self.page.keyboard.press('Escape')
+        except Exception:
+            pass
     
     async def analyze_job_with_ai(self, job: Dict) -> Dict:
         """Analyze job compatibility using Gemini AI"""
@@ -856,55 +977,17 @@ Return this exact JSON structure:
         dry_run = bool(self.config.get('dry_run', False))
 
         try:
-            # Step 1: Navigate to job detail page
-            print("📍 Step 1: Opening job detail page...")
-            await self.page.goto(job['url'], wait_until='domcontentloaded', timeout=30000)
-            await asyncio.sleep(random.uniform(2, 4))
-            
-            # Step 2: Wait for and click Easy Apply button
-            print("📍 Step 2: Locating Easy Apply button...")
-            easy_apply_selectors = [
-                'button.jobs-apply-button',
-                'button:has-text("Easy Apply")',
-                'button[aria-label*="Easy Apply"]'
-            ]
-            
-            easy_apply_btn = None
-            for selector in easy_apply_selectors:
-                try:
-                    easy_apply_btn = await self.page.wait_for_selector(selector, timeout=5000)
-                    if easy_apply_btn:
-                        break
-                except:
-                    continue
-            
-            if not easy_apply_btn:
-                raise Exception("Easy Apply button not found - job may not support Easy Apply")
-            
-            print("✅ Found Easy Apply button, clicking...")
-            await easy_apply_btn.click()
-            await asyncio.sleep(random.uniform(2, 3))
-            
-            # Step 3: Wait for application modal to appear
-            print("📍 Step 3: Waiting for application modal...")
-            modal_selectors = [
-                '.jobs-easy-apply-modal',
-                '[data-test-modal-id="easy-apply-modal"]',
-                '.artdeco-modal'
-            ]
-            
-            modal_appeared = False
-            for selector in modal_selectors:
-                try:
-                    await self.page.wait_for_selector(selector, timeout=5000)
-                    modal_appeared = True
-                    break
-                except:
-                    continue
-            
-            if not modal_appeared:
-                raise Exception("Application modal did not appear after clicking Easy Apply")
-            
+            # Step 1: Open job application with robust handler
+            print("📍 Step 1: Opening job detail page and Easy Apply modal...")
+            job_url = job.get('url')
+            if not job_url:
+                raise Exception("Job URL missing; cannot open application")
+
+            application_handler = ApplicationHandler(self.page)
+            open_result = await application_handler.open_job_application(job_url)
+            if open_result.get('status') != 'SUCCESS':
+                raise Exception(f"Failed to open application: {open_result.get('reason')}")
+
             print("✅ Application modal opened")
 
             # Step 4+: Run the Easy Apply wizard (supports multi-step)
@@ -978,6 +1061,10 @@ Return this exact JSON structure:
 
         try:
             for i in range(max_steps):
+                print(f"\n" + "─" * 80)
+                print(f"📍 EASY APPLY STEP {i+1}/{max_steps}")
+                print(f"─" * 80)
+                
                 _step("fill", f"iteration={i+1}")
                 await self._fill_application_form()
 
@@ -998,6 +1085,8 @@ Return this exact JSON structure:
                     'button:has-text("Submit")',
                 ])
                 if submit_btn:
+                    print(f"\n🎯 SUBMIT BUTTON FOUND!")
+                    print(f"   👁️  Watch browser - about to submit application...")
                     _step("submit_visible")
                     if dry_run:
                         return {
@@ -1035,6 +1124,9 @@ Return this exact JSON structure:
                 ])
                 if next_btn:
                     label = (await next_btn.inner_text()) if hasattr(next_btn, 'inner_text') else "Next"
+                    print(f"\n➡️  NEXT/CONTINUE BUTTON FOUND!")
+                    print(f"   Button text: '{label}'")
+                    print(f"   👁️  Watch browser - moving to next page...")
                     _step("next_clicked", label.strip() if isinstance(label, str) else "")
                     # Use fallback click for next button
                     if not await self._click_button_with_fallback(next_btn, "Next"):
@@ -1088,20 +1180,25 @@ Return this exact JSON structure:
         if not button or not self.page:
             return False
         
+        print(f"\n🖱️  CLICKING BUTTON: {button_name}")
+        print(f"   👁️  Watch browser - button will be clicked now...")
+        
         try:
             # Try normal click first
             await button.click()
-            print(f"  ✓ Clicked {button_name} (normal click)")
+            await asyncio.sleep(0.5)  # Pause so user can see it
+            print(f"   ✅ Successfully clicked '{button_name}' (normal click)")
             return True
         except Exception as e:
-            print(f"  ⚠️  Normal click failed for {button_name}, trying JavaScript click: {str(e)[:50]}")
+            print(f"   ⚠️  Normal click failed, trying JavaScript click...")
             try:
                 # Fallback to JavaScript click (bypasses overlays)
                 await button.evaluate("element => element.click()")
-                print(f"  ✓ Clicked {button_name} (JavaScript fallback)")
+                await asyncio.sleep(0.5)  # Pause so user can see it
+                print(f"   ✅ Successfully clicked '{button_name}' (JavaScript fallback)")
                 return True
             except Exception as e2:
-                print(f"  ❌ JavaScript click also failed for {button_name}: {str(e2)[:50]}")
+                print(f"   ❌ Both click methods failed for '{button_name}': {str(e2)[:50]}")
                 return False
 
     async def _has_required_field_errors(self) -> bool:
@@ -1374,6 +1471,179 @@ Keep it concise, professional, and express genuine interest. Do not include plac
             print(f"   ⚠️  Error detecting application type: {str(e)} - defaulting to multi-step")
             return False
 
+    async def _fetch_github_data(self) -> Dict:
+        """Fetch GitHub profile data using GitHub API"""
+        github_token = os.getenv('GITHUB_API_KEY', '')
+        if not github_token or github_token.startswith('your_') or github_token.startswith('ghp_YOUR'):
+            print("⚠️  No valid GitHub API key found, skipping GitHub data")
+            return {}
+        
+        try:
+            import aiohttp
+            import ssl
+            
+            # Create SSL context that doesn't verify certificates (for development)
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+            
+            headers = {
+                'Authorization': f'token {github_token}',
+                'Accept': 'application/vnd.github.v3+json'
+            }
+            
+            async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=ssl_context)) as session:
+                # Get user profile
+                async with session.get('https://api.github.com/user', headers=headers) as resp:
+                    if resp.status != 200:
+                        print(f"⚠️  GitHub API error: {resp.status}")
+                        return {}
+                    user_data = await resp.json()
+                
+                # Get repos
+                async with session.get(f'https://api.github.com/users/{user_data["login"]}/repos?sort=updated&per_page=10', headers=headers) as resp:
+                    repos_data = await resp.json() if resp.status == 200 else []
+                
+                # Extract useful info
+                github_info = {
+                    'name': user_data.get('name', ''),
+                    'bio': user_data.get('bio', ''),
+                    'company': user_data.get('company', ''),
+                    'location': user_data.get('location', ''),
+                    'public_repos': user_data.get('public_repos', 0),
+                    'followers': user_data.get('followers', 0),
+                    'top_repos': [
+                        {
+                            'name': repo.get('name', ''),
+                            'description': repo.get('description', ''),
+                            'language': repo.get('language', ''),
+                            'stars': repo.get('stargazers_count', 0)
+                        }
+                        for repo in repos_data[:5]
+                    ]
+                }
+                
+                print(f"✅ Fetched GitHub data: {github_info.get('name', 'User')} ({len(github_info['top_repos'])} repos)")
+                return github_info
+                
+        except Exception as e:
+            print(f"⚠️  Error fetching GitHub data: {str(e)[:100]}")
+            return {}
+
+    async def _generate_ai_answer(self, question: str, job_title: str = "", company: str = "") -> str:
+        """Generate AI-powered answer combining resume + GitHub + job context"""
+        
+        # Try OpenAI first if available
+        openai_key = os.getenv('OPENAI_API_KEY', '')
+        if openai_key and not openai_key.startswith('your_') and not openai_key.startswith('sk-proj-YOUR'):
+            try:
+                from openai import OpenAI
+                client = OpenAI(api_key=openai_key)
+                
+                # Fetch GitHub data if not cached
+                if not hasattr(self, '_github_data'):
+                    self._github_data = await self._fetch_github_data()
+                
+                github_summary = ""
+                if self._github_data:
+                    repos = self._github_data.get('top_repos', [])
+                    if repos:
+                        github_summary = f"\n\nGitHub: {len(repos)} projects including "
+                        github_summary += ", ".join([f"{r['name']} ({r['language']})" for r in repos[:3]])
+                
+                resume_excerpt = self.resume_text[:2000] if self.resume_text else "Experienced professional"
+                
+                response = client.chat.completions.create(
+                    model="gpt-3.5-turbo",
+                    messages=[
+                        {"role": "system", "content": "You are helping someone answer a job application question. Provide a professional, concise 2-3 sentence answer."},
+                        {"role": "user", "content": f"Job: {job_title or 'Position'} at {company or 'Company'}\nQuestion: {question}\n\nMy Background:\n{resume_excerpt}{github_summary}\n\nProvide a professional 2-3 sentence answer:"}
+                    ],
+                    max_tokens=150,
+                    temperature=0.7
+                )
+                
+                answer = response.choices[0].message.content.strip()
+                if len(answer) > 500:
+                    answer = answer[:497] + "..."
+                
+                print(f"  🤖 OpenAI Generated answer ({len(answer)} chars)")
+                return answer
+                
+            except Exception as e:
+                print(f"⚠️  OpenAI error: {str(e)[:80]}, trying Gemini fallback...")
+        
+        # Try Gemini as fallback
+        if self.ai_model:
+            try:
+                if not hasattr(self, '_github_data'):
+                    self._github_data = await self._fetch_github_data()
+                
+                github_summary = ""
+                if self._github_data and isinstance(self._github_data, dict):
+                    repos = self._github_data.get('top_repos', [])
+                    if repos and len(repos) > 0:
+                        github_summary = f"\n\nGitHub: {len(repos)} projects"
+                        for repo in repos[:3]:
+                            if isinstance(repo, dict):
+                                repo_name = repo.get('name', 'Project')
+                                repo_desc = repo.get('description', '')
+                                repo_lang = repo.get('language', '')
+                                if repo_desc:
+                                    github_summary += f"\n- {repo_name}: {repo_desc[:60]} ({repo_lang})"
+                                else:
+                                    github_summary += f"\n- {repo_name} ({repo_lang})"
+                
+                resume_excerpt = self.resume_text[:2000] if self.resume_text else "Professional with relevant experience"
+                
+                prompt = f"""Job: {job_title or 'Position'} at {company or 'Company'}
+Question: {question}
+
+My Background:
+{resume_excerpt}
+{github_summary}
+
+Provide a professional 2-3 sentence answer:"""
+
+                response = self.ai_model.generate_content(prompt)
+                
+                # Debug: Check what we got
+                print(f"  DEBUG: Response type: {type(response)}")
+                print(f"  DEBUG: Has text attr: {hasattr(response, 'text')}")
+                
+                # Handle different response formats
+                answer = None
+                if hasattr(response, 'text'):
+                    try:
+                        answer = response.text
+                        if answer:
+                            answer = answer.strip()
+                    except Exception as e:
+                        print(f"  DEBUG: Error accessing .text: {e}")
+                
+                if not answer and hasattr(response, 'candidates') and response.candidates:
+                    try:
+                        answer = response.candidates[0].content.parts[0].text.strip()
+                    except Exception as e:
+                        print(f"  DEBUG: Error accessing candidates: {e}")
+                
+                if not answer:
+                    raise Exception(f"No text in Gemini response. Response: {response}")
+                
+                if len(answer) > 500:
+                    answer = answer[:497] + "..."
+                
+                print(f"  🤖 Gemini Generated answer ({len(answer)} chars)")
+                return answer
+                
+            except Exception as e:
+                print(f"⚠️  Gemini error: {str(e)}")
+        
+        # Final fallback: Use profile data
+        print("⚠️  No AI available, using fallback answer")
+        years_exp = self.user_profile.get('years_experience', '3')
+        return f"I bring {years_exp} years of relevant experience and strong skills in this area. I'm excited about this opportunity and confident I can make valuable contributions to the team."
+
     async def _fill_application_form(self) -> None:
         """Fill all fields on current application page with intelligent detection using user profile.
         Only targets fields INSIDE the Easy Apply modal to prevent filling background page fields."""
@@ -1381,12 +1651,18 @@ Keep it concise, professional, and express genuine interest. Do not include plac
             raise Exception("Browser not initialized")
             
         try:
-            print("📝 Starting form auto-fill with user profile...")
+            print("\n" + "═" * 80)
+            print("📝 FORM AUTO-FILL STARTING")
+            print("═" * 80)
+            print("👁️  WATCH BROWSER: You will see fields being filled automatically...")
+            print()
             
             # Handle resume upload if present
+            print("📄 Checking for resume upload...")
             await self._handle_resume_upload()
             
             # Handle cover letter if present
+            print("📝 Checking for cover letter field...")
             await self._handle_cover_letter()
             
             # Wait for page to be fully loaded
@@ -1400,11 +1676,28 @@ Keep it concise, professional, and express genuine interest. Do not include plac
                 modal = self.page  # Fallback to full page if modal not found
             
             # Get all input fields INSIDE the modal only
-            inputs = await modal.query_selector_all('input[type="text"], input[type="tel"], input[type="email"], input[type="number"], textarea')
+            inputs = await modal.query_selector_all('input[type="text"], input[type="tel"], input[type="email"], input[type="number"]')
+            textareas = await modal.query_selector_all('textarea')
             
-            print(f"🔍 Found {len(inputs)} form fields to fill (modal-specific)")
+            print(f"🔍 Found {len(inputs)} basic fields and {len(textareas)} text areas in Easy Apply modal")
+            print("👁️  WATCH BROWSER: Fields will be filled one by one...\n")
             filled_count = 0
             
+            # Get current job context for AI
+            job_title = ""
+            company = ""
+            try:
+                job_title_elem = await self.page.query_selector('h1.job-title, .jobs-unified-top-card__job-title')
+                if job_title_elem:
+                    job_title = (await job_title_elem.text_content() or "").strip()
+                
+                company_elem = await self.page.query_selector('.jobs-unified-top-card__company-name, .job-details-jobs-unified-top-card__company-name a')
+                if company_elem:
+                    company = (await company_elem.text_content() or "").strip()
+            except:
+                pass
+            
+            # Fill basic input fields first
             for input_field in inputs:
                 try:
                     # Check if field is visible and enabled
@@ -1437,12 +1730,74 @@ Keep it concise, professional, and express genuine interest. Do not include plac
                     if value:
                         await input_field.click()
                         await input_field.fill(value)
-                        await asyncio.sleep(random.uniform(0.2, 0.5))
+                        await asyncio.sleep(random.uniform(0.3, 0.6))  # Slower for visibility
                         filled_count += 1
-                        print(f"  ✅ Filled '{field_identifier[:40]}' with: {value[:50]}")
+                        
+                        # Extract field label for better logging
+                        field_label = field_placeholder or field_aria_label or field_name or field_id
+                        print(f"  ✅ Filled field: '{field_label[:40]}' → '{value[:50]}'")
+                        print(f"     👁️  Look at browser to see the value entered!")
                         
                 except Exception as e:
                     print(f"  ⚠️  Could not fill field: {str(e)[:50]}")
+            
+            # Fill textareas with AI-generated answers
+            print(f"\n🤖 Processing {len(textareas)} custom question fields with AI...")
+            for textarea in textareas:
+                try:
+                    # Check if field is visible and enabled
+                    if not await textarea.is_visible():
+                        continue
+                    
+                    # Check if disabled or readonly
+                    is_disabled = await textarea.get_attribute('disabled')
+                    is_readonly = await textarea.get_attribute('readonly')
+                    if is_disabled is not None or is_readonly is not None:
+                        continue
+                    
+                    # Check if already filled
+                    current_value = await textarea.input_value()
+                    if current_value and len(current_value.strip()) > 10:
+                        continue
+                    
+                    # Get question context
+                    field_name = await textarea.get_attribute('name') or ''
+                    field_id = await textarea.get_attribute('id') or ''
+                    field_placeholder = await textarea.get_attribute('placeholder') or ''
+                    field_aria_label = await textarea.get_attribute('aria-label') or ''
+                    
+                    # Try to find associated label
+                    question_text = field_aria_label or field_placeholder or field_name
+                    
+                    # Try to find label element
+                    try:
+                        label_for = field_id if field_id else None
+                        if label_for:
+                            label_elem = await modal.query_selector(f'label[for="{label_for}"]')
+                            if label_elem:
+                                label_text = await label_elem.text_content()
+                                if label_text:
+                                    question_text = label_text.strip()
+                    except:
+                        pass
+                    
+                    if question_text and len(question_text) > 5:
+                        print(f"\n  ❓ Question: {question_text[:80]}")
+                        print(f"  🤖 Generating AI answer...")
+                        
+                        # Generate AI answer combining resume + GitHub + job context
+                        ai_answer = await self._generate_ai_answer(question_text, job_title, company)
+                        
+                        if ai_answer:
+                            await textarea.click()
+                            await textarea.fill(ai_answer)
+                            await asyncio.sleep(random.uniform(0.5, 0.8))
+                            filled_count += 1
+                            print(f"  ✅ AI Answer: {ai_answer[:100]}...")
+                            print(f"     👁️  Look at browser to see the AI-generated answer!")
+                    
+                except Exception as e:
+                    print(f"  ⚠️  Could not fill textarea: {str(e)[:50]}")
             
             # Handle dropdowns (modal-specific)
             selects = await modal.query_selector_all('select')
@@ -1466,14 +1821,17 @@ Keep it concise, professional, and express genuine interest. Do not include plac
                     if value:
                         await select.select_option(label=value)
                         filled_count += 1
-                        print(f"  ✅ Selected dropdown: {value}")
+                        print(f"  ✅ Selected dropdown: '{field_identifier[:40]}' → '{value}'")
+                        print(f"     👁️  Look at browser to see dropdown selection!")
                     else:
                         # Default: select first non-empty option
                         options = await select.query_selector_all('option')
                         if len(options) > 1:
+                            option_text = await options[1].text_content()
                             await options[1].click()
                             filled_count += 1
-                            print(f"  ✅ Selected default dropdown option")
+                            print(f"  ✅ Selected default dropdown: '{option_text}'")
+                            print(f"     👁️  Look at browser to see dropdown selection!")
                 except Exception as e:
                     print(f"  ⚠️  Could not select dropdown: {str(e)[:50]}")
             
@@ -1527,7 +1885,10 @@ Keep it concise, professional, and express genuine interest. Do not include plac
                 except Exception as e:
                     pass
             
-            print(f"✅ Form auto-fill complete! Filled {filled_count} fields (modal-specific)")
+            print(f"\n✅ FORM AUTO-FILL COMPLETE!")
+            print(f"📊 Filled {filled_count} fields total")
+            print(f"👁️  Check the browser to see all filled values")
+            print("═" * 80 + "\n")
                     
         except Exception as e:
             print(f"⚠️  Form filling error: {str(e)}")
@@ -2007,10 +2368,12 @@ Keep it concise, professional, and express genuine interest. Do not include plac
             if self.page is None:
                 return {'success': False, 'message': 'Browser page not initialized'}
             
-            # Navigate to job
+            # Open application with robust handler (avoids networkidle timeouts)
             print(f"🔍 Navigating to job: {job_url}")
-            await self.page.goto(job_url, wait_until='networkidle', timeout=30000)
-            await asyncio.sleep(2)
+            handler = ApplicationHandler(self.page)
+            open_result = await handler.open_job_application(job_url)
+            if open_result.get('status') != 'SUCCESS':
+                return {'success': False, 'message': open_result.get('reason', 'Failed to open application')}
             
             # Create job dict
             job = {
@@ -2034,7 +2397,7 @@ Keep it concise, professional, and express genuine interest. Do not include plac
             # Apply to job
             result = await self.auto_apply_job(job)
             
-            success = result.get('application_status') == 'SUCCESS'
+            success = result.get('application_status') in ('APPLIED', 'SUCCESS')
             
             return {
                 'success': success,

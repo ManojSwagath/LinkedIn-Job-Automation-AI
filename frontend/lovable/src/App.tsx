@@ -1,3 +1,4 @@
+import AutomationPage from "./pages/Automation";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -43,6 +44,7 @@ const App = () => (
             <Route path="search" element={<JobSearchConfig />} />
             <Route path="recommended" element={<RecommendedJobs />} />
             <Route path="applications" element={<Applications />} />
+            <Route path="automation" element={<AutomationPage />} />
             <Route path="resume" element={<DashboardHome />} />
             <Route path="settings" element={<ApiKeySettings />} />
             <Route path="help" element={<DashboardHome />} />

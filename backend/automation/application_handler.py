@@ -5,6 +5,7 @@ Fixes application opening issues and improves form filling reliability
 
 import asyncio
 import random
+import time
 from typing import Dict, Optional
 from playwright.async_api import Page, TimeoutError as PlaywrightTimeoutError
 
@@ -158,56 +159,163 @@ class ApplicationHandler:
         Returns:
             bool: True if clicked successfully
         """
-        # Multiple selector strategies for Easy Apply button
+        print("   🔍 Looking for Easy Apply button with multiple selectors...")
+        
+        # First, close any open modals that might be blocking
+        try:
+            close_buttons = await self.page.query_selector_all('button[aria-label*="Dismiss"], button[data-test-modal-close-btn]')
+            for close_btn in close_buttons:
+                try:
+                    if await close_btn.is_visible():
+                        print("   🚪 Closing interfering modal...")
+                        await close_btn.click()
+                        await asyncio.sleep(0.5)
+                except:
+                    pass
+        except:
+            pass
+        
+        # Multiple selector strategies for Easy Apply button (LinkedIn 2024/2025)
+        # Prefer "Easy Apply" explicitly; generic "Apply" can be an external apply.
         selectors = [
-            # Primary selectors
-            'button.jobs-apply-button',
-            'button[aria-label*="Easy Apply"]',
+            # Top-card specific (most reliable)
+            '.jobs-unified-top-card button:has-text("Easy Apply")',
+            '.jobs-unified-top-card button[aria-label*="Easy Apply"]',
+            '.jobs-unified-top-card button.jobs-apply-button',
+            '.jobs-details-top-card button:has-text("Easy Apply")',
+
+            # Current LinkedIn selectors
+            'button.jobs-apply-button--top-card:has-text("Easy Apply")',
+            'button.jobs-apply-button:has-text("Easy Apply")',
+            'button.artdeco-button--primary:has-text("Easy Apply")',
+
+            # Text / aria fallbacks
             'button:has-text("Easy Apply")',
-            
-            # Alternative selectors
-            '.jobs-apply-button',
-            'button.artdeco-button--primary:has-text("Apply")',
-            'button[data-control-name="jobdetails_topcard_inapply"]',
-            
-            # Broader selectors (use with caution)
-            'button:has-text("Apply")',
+            'button[aria-label*="Easy Apply"]',
+            'a:has-text("Easy Apply")',
+
+            # Last resort: "Apply" (could be offsite)
+            '.jobs-unified-top-card button:has-text("Apply")',
+            'button.jobs-apply-button--top-card',
+            'button.jobs-apply-button',
         ]
         
-        for selector in selectors:
+        # First, list candidate apply-ish controls for debugging (including aria-label and anchors)
+        try:
+            candidates = await self.page.query_selector_all('button, a')
+            print(f"   📊 Found {len(candidates)} clickable candidates (button/a), checking for Apply...")
+            shown = 0
+            for el in candidates:
+                if shown >= 25:
+                    break
+                try:
+                    text = (await el.inner_text()) or ""
+                    aria = (await el.get_attribute('aria-label')) or ""
+                    combined = f"{text} {aria}".strip().lower()
+                    if any(k in combined for k in ("easy apply", "apply", "bewerben", "candidature")):
+                        print(f"      • Candidate: text='{text.strip()[:60]}' aria='{aria.strip()[:60]}'")
+                        shown += 1
+                except Exception:
+                    continue
+        except Exception:
+            pass
+
+        # Strategy: if explicit selector tries fail, do a DOM scan inside the top-card to find an Easy Apply control.
+        async def find_easy_apply_by_scan() -> Optional[object]:
+            containers = [
+                '.jobs-unified-top-card',
+                '.jobs-details-top-card',
+                'main',
+            ]
+            for csel in containers:
+                try:
+                    container = await self.page.query_selector(csel)
+                    if not container:
+                        continue
+                    els = await container.query_selector_all('button, a')
+                    for el in els:
+                        try:
+                            if not await el.is_visible():
+                                continue
+                            text = (await el.inner_text()) or ""
+                            aria = (await el.get_attribute('aria-label')) or ""
+                            combined = f"{text} {aria}".strip().lower()
+                            if "easy apply" in combined:
+                                return el
+                        except Exception:
+                            continue
+                except Exception:
+                    continue
+            return None
+        
+        for idx, selector in enumerate(selectors, 1):
             try:
+                print(f"   [{idx}/{len(selectors)}] Trying selector: {selector[:50]}...")
+                
                 # Find button
-                button = await self.page.wait_for_selector(selector, timeout=3000)
+                button = await self.page.wait_for_selector(selector, timeout=2000)
                 
                 if not button:
                     continue
                 
                 # Check if button is visible and enabled
                 if not await button.is_visible():
+                    print(f"       ↳ Found but not visible")
                     continue
                 
                 if not await button.is_enabled():
-                    print(f"   ⚠️  Button found but disabled: {selector}")
+                    print(f"       ↳ Found but disabled")
                     continue
                 
                 # Get button text to verify it's the right button
-                button_text = await button.inner_text()
-                if 'Easy Apply' not in button_text and 'Apply' not in button_text:
-                    continue
+                button_text = (await button.inner_text()) or ""
+                aria_label = (await button.get_attribute('aria-label')) or ""
+                print(f"       ✓ Found button: '{button_text.strip()}'")
                 
-                print(f"   ✓ Found button: {button_text.strip()}")
+                # Verify it's an Apply button
+                verify_text = f"{button_text} {aria_label}".lower()
+                if 'apply' not in verify_text:
+                    print(f"       ↳ Not an Apply button, skipping")
+                    continue
+
+                # Prefer Easy Apply; if selector matched generic Apply but not Easy Apply, keep trying others first
+                if 'easy apply' not in verify_text and 'apply' in verify_text:
+                    print("       ↳ Generic Apply detected (might be offsite); will still try click but may skip")
                 
                 # Try to click with multiple strategies
+                print(f"       👆 Attempting to click...")
                 clicked = await self._robust_click(button, "Easy Apply")
                 if clicked:
+                    print(f"       ✅ Successfully clicked Easy Apply button!")
                     return True
                     
             except PlaywrightTimeoutError:
                 # This selector didn't work, try next one
+                print(f"       ↳ Timeout (button not found with this selector)")
                 continue
             except Exception as e:
-                print(f"   ⚠️  Error with selector {selector}: {str(e)[:50]}")
+                print(f"       ⚠️  Error: {str(e)[:60]}")
                 continue
+        
+        print(f"   ❌ Easy Apply button not found with any selector")
+
+        try:
+            scanned = await find_easy_apply_by_scan()
+            if scanned:
+                print("   🔎 Found Easy Apply via DOM scan, attempting click...")
+                clicked = await self._robust_click(scanned, "Easy Apply (scan)")
+                if clicked:
+                    return True
+        except Exception:
+            pass
+        
+        # Take screenshot for debugging
+        try:
+            screenshot_path = f"debug_screenshots/no_easy_apply_button_{int(time.time())}.png"
+            await self.page.screenshot(path=screenshot_path)
+            print(f"   📸 Screenshot saved to: {screenshot_path}")
+        except:
+            pass
         
         return False
     
