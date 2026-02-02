@@ -1065,29 +1065,67 @@ Return this exact JSON structure:
                 print(f"📍 EASY APPLY STEP {i+1}/{max_steps}")
                 print(f"─" * 80)
                 
+                # Wait for modal to be stable - reduced timeout
+                await asyncio.sleep(0.5)
+                
                 _step("fill", f"iteration={i+1}")
                 await self._fill_application_form()
+                
+                # Wait after filling for page to update
+                await asyncio.sleep(0.5)
 
                 # If there are visible error messages about required fields, stop and report.
                 if await self._has_required_field_errors():
+                    print("⚠️  Required field errors detected, attempting to continue anyway...")
+
+                # CRITICAL FIX: First find the primary button in footer, then check its text
+                modal = await self.page.query_selector('.jobs-easy-apply-modal, .jobs-easy-apply-content, [data-test-modal]')
+                if not modal:
+                    modal = self.page
+                
+                # Find the primary button in the modal footer
+                primary_btn = None
+                btn_text = ""
+                
+                # Quick search for primary button - no timeout
+                for selector in [
+                    'footer button.artdeco-button--primary',
+                    '.jobs-easy-apply-footer button.artdeco-button--primary',
+                    'button.artdeco-button--primary[data-easy-apply-next-button]',
+                    'button.artdeco-button--primary'
+                ]:
+                    try:
+                        btn = await modal.query_selector(selector)
+                        if btn and await btn.is_visible():
+                            primary_btn = btn
+                            try:
+                                btn_text = (await btn.inner_text() or "").strip().lower()
+                            except:
+                                btn_text = ""
+                            break
+                    except:
+                        continue
+                
+                if not primary_btn:
+                    print("⚠️  No primary button found in modal")
                     return {
                         "status": "NEEDS_REVIEW",
-                        "reason": "Required fields need manual input",
+                        "reason": "Could not find Next/Submit button",
                         "steps": steps,
-                        "errors": ["required_fields"],
+                        "errors": errors + ["no_button_found"],
                     }
-
-                # Prefer submit if present
-                submit_btn = await self._find_primary_button([
-                    'button[aria-label*="Submit application"]',
-                    'button:has-text("Submit application")',
-                    'button.artdeco-button--primary:has-text("Submit")',
-                    'button:has-text("Submit")',
-                ])
-                if submit_btn:
-                    print(f"\n🎯 SUBMIT BUTTON FOUND!")
-                    print(f"   👁️  Watch browser - about to submit application...")
-                    _step("submit_visible")
+                
+                print(f"🔍 Found button with text: '{btn_text}'")
+                
+                # Check if this is the SUBMIT button (final step)
+                is_submit = 'submit' in btn_text and 'application' in btn_text
+                is_review = 'review' in btn_text
+                is_next = 'next' in btn_text or 'continue' in btn_text
+                
+                if is_submit:
+                    print(f"\n🎯 SUBMIT BUTTON FOUND! Text: '{btn_text}'")
+                    _step("submit_visible", btn_text)
+                    
                     if dry_run:
                         return {
                             "status": "DRY_RUN",
@@ -1095,8 +1133,9 @@ Return this exact JSON structure:
                             "steps": steps,
                             "errors": errors,
                         }
-                    # Use fallback click for submit button
-                    if not await self._click_button_with_fallback(submit_btn, "Submit"):
+                    
+                    # Click submit button
+                    if not await self._click_button_with_fallback(primary_btn, "Submit Application"):
                         return {
                             "status": "FAILED",
                             "reason": "Could not click Submit button",
@@ -1104,7 +1143,8 @@ Return this exact JSON structure:
                             "errors": errors + ["submit_click_failed"],
                         }
                     _step("submit_clicked")
-                    await asyncio.sleep(random.uniform(2, 4))
+                    await asyncio.sleep(3)
+                    
                     if await self._verify_submission():
                         return {"status": "APPLIED", "steps": steps, "errors": errors}
                     return {
@@ -1113,39 +1153,31 @@ Return this exact JSON structure:
                         "steps": steps,
                         "errors": errors + ["submit_not_confirmed"],
                     }
+                
+                # It's a Next/Continue/Review button - click and continue to next step
+                action_name = "Review" if is_review else "Next"
+                print(f"\n➡️  {action_name.upper()} BUTTON FOUND! Text: '{btn_text}'")
+                _step(f"{action_name.lower()}_clicked", btn_text)
+                
+                if not await self._click_button_with_fallback(primary_btn, action_name):
+                    return {
+                        "status": "FAILED",
+                        "reason": f"Could not click {action_name} button",
+                        "steps": steps,
+                        "errors": errors + [f"{action_name.lower()}_click_failed"],
+                    }
+                
+                # Wait for next page to load
+                await asyncio.sleep(1.5)
+                print(f"   ✅ Clicked {action_name}, moving to next step...")
+                continue
 
-                # Otherwise try next/review
-                next_btn = await self._find_primary_button([
-                    'button:has-text("Next")',
-                    'button:has-text("Continue")',
-                    'button[aria-label*="Continue to next step"]',
-                    'button[aria-label*="Review your application"]',
-                    'button:has-text("Review")',
-                ])
-                if next_btn:
-                    label = (await next_btn.inner_text()) if hasattr(next_btn, 'inner_text') else "Next"
-                    print(f"\n➡️  NEXT/CONTINUE BUTTON FOUND!")
-                    print(f"   Button text: '{label}'")
-                    print(f"   👁️  Watch browser - moving to next page...")
-                    _step("next_clicked", label.strip() if isinstance(label, str) else "")
-                    # Use fallback click for next button
-                    if not await self._click_button_with_fallback(next_btn, "Next"):
-                        return {
-                            "status": "FAILED",
-                            "reason": "Could not click Next button",
-                            "steps": steps,
-                            "errors": errors + ["next_click_failed"],
-                        }
-                    await asyncio.sleep(random.uniform(2, 4))
-                    continue
-
-                # If neither next nor submit exists, we are likely blocked.
-                return {
-                    "status": "NEEDS_REVIEW",
-                    "reason": "Could not find Next/Submit button (unsupported step)",
-                    "steps": steps,
-                    "errors": errors + ["no_next_or_submit"],
-                }
+            return {
+                "status": "NEEDS_REVIEW",
+                "reason": "Max steps exceeded",
+                "steps": steps,
+                "errors": errors + ["max_steps"],
+            }
 
             return {
                 "status": "NEEDS_REVIEW",
@@ -1162,17 +1194,60 @@ Return this exact JSON structure:
         """Return first visible, enabled button matching any selector with JavaScript click fallback."""
         if not self.page:
             return None
+        
+        # First, try to find buttons INSIDE the modal only
+        modal_selectors = [
+            '.jobs-easy-apply-modal',
+            '.jobs-easy-apply-content',
+            '[data-test-modal]',
+            '.artdeco-modal__content'
+        ]
+        
+        modal = None
+        for modal_sel in modal_selectors:
+            try:
+                modal = await self.page.query_selector(modal_sel)
+                if modal:
+                    break
+            except:
+                continue
+        
+        # Search within modal first, then fallback to page
+        search_context = modal if modal else self.page
+        
         for sel in selectors:
             try:
-                btn = await self.page.query_selector(sel)
+                btn = await search_context.query_selector(sel)
                 if btn and await btn.is_visible() and await btn.is_enabled():
+                    # Scroll button into view
+                    try:
+                        await btn.scroll_into_view_if_needed()
+                        await asyncio.sleep(0.3)
+                    except:
+                        pass
                     return btn
             except Exception:
                 continue
+        
+        # If not found in modal, try page-wide search
+        if modal:
+            for sel in selectors:
+                try:
+                    btn = await self.page.query_selector(sel)
+                    if btn and await btn.is_visible() and await btn.is_enabled():
+                        try:
+                            await btn.scroll_into_view_if_needed()
+                            await asyncio.sleep(0.3)
+                        except:
+                            pass
+                        return btn
+                except Exception:
+                    continue
+        
         return None
     
     async def _click_button_with_fallback(self, button, button_name: str = "button") -> bool:
-        """Click button with JavaScript fallback for overlay issues.
+        """Click button with multiple fallback strategies for overlay issues.
         
         Returns:
             bool: True if click succeeded, False otherwise
@@ -1180,26 +1255,65 @@ Return this exact JSON structure:
         if not button or not self.page:
             return False
         
-        print(f"\n🖱️  CLICKING BUTTON: {button_name}")
-        print(f"   👁️  Watch browser - button will be clicked now...")
+        print(f"🖱️  Clicking: {button_name}")
         
+        # Scroll into view
         try:
-            # Try normal click first
-            await button.click()
-            await asyncio.sleep(0.5)  # Pause so user can see it
-            print(f"   ✅ Successfully clicked '{button_name}' (normal click)")
+            await button.scroll_into_view_if_needed()
+            await asyncio.sleep(0.3)
+        except:
+            pass
+        
+        # Strategy 1: Normal click (fastest)
+        try:
+            await button.click(timeout=2000)
+            await asyncio.sleep(0.8)
+            print(f"   ✅ Clicked '{button_name}'")
             return True
-        except Exception as e:
-            print(f"   ⚠️  Normal click failed, trying JavaScript click...")
-            try:
-                # Fallback to JavaScript click (bypasses overlays)
-                await button.evaluate("element => element.click()")
-                await asyncio.sleep(0.5)  # Pause so user can see it
-                print(f"   ✅ Successfully clicked '{button_name}' (JavaScript fallback)")
+        except:
+            pass
+        
+        # Strategy 2: Force click
+        try:
+            await button.click(force=True, timeout=2000)
+            await asyncio.sleep(0.8)
+            print(f"   ✅ Clicked '{button_name}' (force)")
+            return True
+        except:
+            pass
+        
+        # Strategy 3: JavaScript click
+        try:
+            await button.evaluate("el => el.click()")
+            await asyncio.sleep(0.8)
+            print(f"   ✅ Clicked '{button_name}' (JS)")
+            return True
+        except:
+            pass
+        
+        # Strategy 4: Focus + Enter
+        try:
+            await button.focus()
+            await self.page.keyboard.press('Enter')
+            await asyncio.sleep(0.8)
+            print(f"   ✅ Clicked '{button_name}' (Enter)")
+            return True
+        except:
+            pass
+        
+        # Strategy 5: Mouse coordinates
+        try:
+            box = await button.bounding_box()
+            if box:
+                await self.page.mouse.click(box['x'] + box['width']/2, box['y'] + box['height']/2)
+                await asyncio.sleep(0.8)
+                print(f"   ✅ Clicked '{button_name}' (mouse)")
                 return True
-            except Exception as e2:
-                print(f"   ❌ Both click methods failed for '{button_name}': {str(e2)[:50]}")
-                return False
+        except:
+            pass
+        
+        print(f"   ❌ Failed to click '{button_name}'")
+        return False
 
     async def _has_required_field_errors(self) -> bool:
         """Detect common validation errors shown in Easy Apply forms."""
@@ -1665,21 +1779,35 @@ Provide a professional 2-3 sentence answer:"""
             print("📝 Checking for cover letter field...")
             await self._handle_cover_letter()
             
-            # Wait for page to be fully loaded
-            await self.page.wait_for_load_state('networkidle', timeout=5000)
-            await asyncio.sleep(1)
+            # FIXED: Don't wait for networkidle - just a brief pause
+            try:
+                await self.page.wait_for_load_state('domcontentloaded', timeout=2000)
+            except:
+                pass
+            await asyncio.sleep(0.5)
             
             # CRITICAL FIX: Only target fields INSIDE the Easy Apply modal
-            modal = await self.page.query_selector('.jobs-easy-apply-modal, .jobs-easy-apply-content')
+            modal = await self.page.query_selector('.jobs-easy-apply-modal, .jobs-easy-apply-content, [data-test-modal]')
             if not modal:
-                print("⚠️  Warning: Could not find Easy Apply modal, trying full page")
+                print("⚠️  Warning: Could not find Easy Apply modal, trying alternative selectors")
+                modal = await self.page.query_selector('.artdeco-modal__content')
+            if not modal:
+                print("⚠️  Warning: Still no modal found, using full page")
                 modal = self.page  # Fallback to full page if modal not found
+            else:
+                print("✅ Found Easy Apply modal")
             
-            # Get all input fields INSIDE the modal only
-            inputs = await modal.query_selector_all('input[type="text"], input[type="tel"], input[type="email"], input[type="number"]')
+            # Get all input fields INSIDE the modal only - include more input types
+            inputs = await modal.query_selector_all('input[type="text"], input[type="tel"], input[type="email"], input[type="number"], input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="submit"])')
             textareas = await modal.query_selector_all('textarea')
             
-            print(f"🔍 Found {len(inputs)} basic fields and {len(textareas)} text areas in Easy Apply modal")
+            print(f"🔍 Found {len(inputs)} input fields and {len(textareas)} text areas in Easy Apply modal")
+            
+            # Also look for typeahead inputs (LinkedIn uses these for location)
+            typeahead_inputs = await modal.query_selector_all('[role="combobox"], .fb-single-typeahead-input, input[aria-autocomplete="list"]')
+            if typeahead_inputs:
+                print(f"🔍 Found {len(typeahead_inputs)} typeahead/autocomplete fields")
+            
             print("👁️  WATCH BROWSER: Fields will be filled one by one...\n")
             filled_count = 0
             
@@ -1713,6 +1841,7 @@ Provide a professional 2-3 sentence answer:"""
                     # Check if already filled - skip if has value
                     current_value = await input_field.input_value()
                     if current_value and len(current_value.strip()) > 2:
+                        print(f"  ⏩ Skipping already filled field: '{current_value[:30]}...'")
                         continue
                     
                     # Get field identifiers
@@ -1720,26 +1849,110 @@ Provide a professional 2-3 sentence answer:"""
                     field_id = await input_field.get_attribute('id') or ''
                     field_placeholder = await input_field.get_attribute('placeholder') or ''
                     field_aria_label = await input_field.get_attribute('aria-label') or ''
+                    field_type = await input_field.get_attribute('type') or 'text'
+                    
+                    # Also try to find associated label by looking at parent or nearby elements
+                    label_text = ''
+                    try:
+                        # Method 1: Label with for attribute
+                        if field_id:
+                            label_elem = await modal.query_selector(f'label[for="{field_id}"]')
+                            if label_elem:
+                                label_text = (await label_elem.text_content() or '').strip()
+                        
+                        # Method 2: Parent container text
+                        if not label_text:
+                            parent = await input_field.evaluate("el => el.parentElement?.textContent?.trim()?.substring(0, 100)")
+                            if parent and len(parent) < 80:
+                                label_text = parent
+                        
+                        # Method 3: Preceding sibling label
+                        if not label_text:
+                            prev_label = await input_field.evaluate("el => el.previousElementSibling?.textContent?.trim()")
+                            if prev_label and len(prev_label) < 50:
+                                label_text = prev_label
+                    except:
+                        pass
                     
                     # Combine all identifiers for smart matching
-                    field_identifier = f"{field_name} {field_id} {field_placeholder} {field_aria_label}".lower()
+                    field_identifier = f"{field_name} {field_id} {field_placeholder} {field_aria_label} {label_text}".lower()
+                    
+                    print(f"  🔍 Field detected: type={field_type}, identifier='{field_identifier[:60]}...'")
                     
                     # Get appropriate value using smart matching
                     value = self._get_field_value_smart(field_identifier, 'text', self.user_profile)
                     
                     if value:
                         await input_field.click()
+                        await asyncio.sleep(0.2)
+                        await input_field.fill('')  # Clear first
                         await input_field.fill(value)
                         await asyncio.sleep(random.uniform(0.3, 0.6))  # Slower for visibility
                         filled_count += 1
                         
                         # Extract field label for better logging
-                        field_label = field_placeholder or field_aria_label or field_name or field_id
+                        field_label = label_text or field_placeholder or field_aria_label or field_name or field_id
                         print(f"  ✅ Filled field: '{field_label[:40]}' → '{value[:50]}'")
                         print(f"     👁️  Look at browser to see the value entered!")
+                    else:
+                        print(f"  ⚠️  No value found for field: '{field_identifier[:50]}'")
                         
                 except Exception as e:
                     print(f"  ⚠️  Could not fill field: {str(e)[:50]}")
+            
+            # Handle typeahead/autocomplete inputs (LinkedIn uses these for location)
+            print(f"\n📍 Processing typeahead/autocomplete fields for location...")
+            typeahead_inputs = await modal.query_selector_all('[role="combobox"], .fb-single-typeahead-input, input[aria-autocomplete="list"]')
+            for typeahead in typeahead_inputs:
+                try:
+                    if not await typeahead.is_visible():
+                        continue
+                    
+                    # Get field identifier
+                    field_id = await typeahead.get_attribute('id') or ''
+                    field_aria_label = await typeahead.get_attribute('aria-label') or ''
+                    field_placeholder = await typeahead.get_attribute('placeholder') or ''
+                    
+                    # Try to get label
+                    label_text = ''
+                    try:
+                        if field_id:
+                            label_elem = await modal.query_selector(f'label[for="{field_id}"]')
+                            if label_elem:
+                                label_text = (await label_elem.text_content() or '').strip()
+                    except:
+                        pass
+                    
+                    field_identifier = f"{field_id} {field_aria_label} {field_placeholder} {label_text}".lower()
+                    print(f"  🔍 Typeahead field: '{field_identifier[:60]}...'")
+                    
+                    # Check if this looks like a location field
+                    if any(keyword in field_identifier for keyword in ['location', 'city', 'where', 'address']):
+                        location_value = self.user_profile.get('location') or self.user_profile.get('city') or self.config.get('location', 'Hyderabad')
+                        if location_value:
+                            print(f"  📍 Filling location: {location_value}")
+                            await typeahead.click()
+                            await asyncio.sleep(0.3)
+                            await typeahead.fill('')
+                            await typeahead.type(location_value, delay=50)  # Type slowly for typeahead
+                            await asyncio.sleep(1)  # Wait for suggestions
+                            
+                            # Try to select first suggestion
+                            try:
+                                suggestion = await self.page.query_selector('[role="option"]:first-child, .basic-typeahead__selectable:first-child, [data-test-veneer-id="typeahead-suggestion"]:first-child')
+                                if suggestion:
+                                    await suggestion.click()
+                                    print(f"  ✅ Selected location suggestion")
+                                else:
+                                    # Press Enter to confirm
+                                    await self.page.keyboard.press('Enter')
+                                    print(f"  ✅ Entered location (no suggestion found)")
+                            except:
+                                await self.page.keyboard.press('Enter')
+                            
+                            filled_count += 1
+                except Exception as e:
+                    print(f"  ⚠️  Could not fill typeahead: {str(e)[:50]}")
             
             # Fill textareas with AI-generated answers
             print(f"\n🤖 Processing {len(textareas)} custom question fields with AI...")
@@ -1955,14 +2168,18 @@ Provide a professional 2-3 sentence answer:"""
             return profile.get('email', '') or os.getenv('LINKEDIN_EMAIL', '')
         
         if any(keyword in field_identifier for keyword in ['phone', 'mobile', 'telephone', 'contact number', 'cell']):
-            return profile.get('phone_number', '') or os.getenv('PHONE_NUMBER', '')
+            return profile.get('phone_number', '') or profile.get('phone', '') or os.getenv('PHONE_NUMBER', '')
+        
+        # IMPROVED: Location fields - handle various location-related fields
+        if any(keyword in field_identifier for keyword in ['location', 'preferred location', 'work location', 'job location']):
+            return profile.get('location', '') or profile.get('preferred_location', '') or profile.get('city', '')
         
         # Address fields
         if any(keyword in field_identifier for keyword in ['street', 'address line 1', 'address1', 'street address']):
-            return profile.get('street_address', '') or os.getenv('ADDRESS', '')
+            return profile.get('street_address', '') or profile.get('address', '') or os.getenv('ADDRESS', '')
         
         if 'city' in field_identifier and 'state' not in field_identifier:
-            return profile.get('city', '') or os.getenv('CITY', '')
+            return profile.get('city', '') or profile.get('location', '') or os.getenv('CITY', '')
         
         if any(keyword in field_identifier for keyword in ['state', 'province', 'region']) and 'country' not in field_identifier:
             return profile.get('state', '') or os.getenv('STATE', '')
@@ -2046,31 +2263,68 @@ Provide a professional 2-3 sentence answer:"""
             return False
             
         try:
-            # Look for success indicators
-            await asyncio.sleep(2)
+            # Wait for potential modal/success message to appear
+            await asyncio.sleep(3)
             
-            # Check for success message
+            # Check for success indicators - more comprehensive list
             success_selectors = [
                 'text="Application submitted"',
                 'text="Your application was sent"',
+                'text="Application sent"',
                 'text="successfully"',
-                '[data-test-modal-id="application-submitted-modal"]'
+                'text="You applied"',
+                'text="Applied"',
+                '[data-test-modal-id="application-submitted-modal"]',
+                '.artdeco-modal:has-text("Application submitted")',
+                '.artdeco-modal:has-text("Application sent")',
+                'h2:has-text("Application submitted")',
+                'h2:has-text("Application sent")',
+                '[aria-label*="Application submitted"]',
+                '[aria-label*="Application sent"]',
             ]
             
             for selector in success_selectors:
                 try:
-                    await self.page.wait_for_selector(selector, timeout=3000)
-                    return True
+                    el = await self.page.query_selector(selector)
+                    if el and await el.is_visible():
+                        print("   ✅ Application submission confirmed!")
+                        return True
                 except:
                     continue
             
             # Check URL change
             if 'application-submitted' in self.page.url:
+                print("   ✅ Application confirmed via URL")
                 return True
             
+            # Check if modal closed (sometimes indicates success)
+            modal_still_open = await self.page.query_selector('.jobs-easy-apply-modal')
+            if not modal_still_open:
+                print("   ✅ Modal closed - likely submitted")
+                return True
+            
+            # Check page content for success message
+            try:
+                page_text = await self.page.inner_text('body')
+                success_phrases = [
+                    'application submitted',
+                    'application was sent',
+                    'you applied',
+                    'successfully applied',
+                    'application received'
+                ]
+                for phrase in success_phrases:
+                    if phrase in page_text.lower():
+                        print(f"   ✅ Found success phrase: '{phrase}'")
+                        return True
+            except:
+                pass
+            
+            print("   ⚠️  Could not confirm submission")
             return False
             
-        except:
+        except Exception as e:
+            print(f"   ⚠️  Verification error: {str(e)[:50]}")
             return False
     
     async def _save_application(self, job: Dict) -> None:

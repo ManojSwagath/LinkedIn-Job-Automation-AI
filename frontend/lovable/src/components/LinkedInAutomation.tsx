@@ -85,7 +85,7 @@ export default function LinkedInAutomation() {
     workAuthorizationUs: 'Yes',
     requireSponsorship: 'No',
     willingToRelocate: 'Yes',
-    dryRun: true,
+    dryRun: false,  // CHANGED: Default to false to actually submit applications
     headless: false,
     resume: null
   });
