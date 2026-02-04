@@ -25,8 +25,8 @@ async def run_automation():
     config = {
         'linkedin_email': os.getenv('LINKEDIN_EMAIL'),
         'linkedin_password': os.getenv('LINKEDIN_PASSWORD'),
-        'keywords': os.getenv('JOB_KEYWORDS', 'Software Engineer'),
-        'location': os.getenv('JOB_LOCATION', 'United States'),
+        'keyword': os.getenv('JOB_KEYWORDS', 'Software Engineer'),  # Fixed: bot expects 'keyword'
+        'location': os.getenv('JOB_LOCATION', 'United States'),     # Fixed: bot expects 'location'
         'max_applications': int(os.getenv('MAX_APPLICATIONS', '5')),
         'test_mode': os.getenv('TEST_MODE', 'true').lower() == 'true',
         'user_profile': {
@@ -46,8 +46,8 @@ async def run_automation():
         return
     
     print(f"\n� Configuration:")
-    print(f"   Keywords: {config['keywords']}")
-    print(f"   Location: {config['location']}")
+    print(f"   Keywords: {config['keyword']}")  # Fixed
+    print(f"   Location: {config['location']}")  # Fixed
     print(f"   Max Apps: {config['max_applications']}")
     print(f"   Test Mode: {config['test_mode']}")
     

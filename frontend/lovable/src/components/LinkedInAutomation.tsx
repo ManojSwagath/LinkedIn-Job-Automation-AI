@@ -181,7 +181,7 @@ export default function LinkedInAutomation() {
         apiFormData.append('resume', formData.resume);
       }
 
-      const response = await fetch('http://localhost:8000/api/v2/start-automation', {
+      const response = await fetch('http://127.0.0.1:8000/api/v2/start-automation', {
         method: 'POST',
         body: apiFormData
       });

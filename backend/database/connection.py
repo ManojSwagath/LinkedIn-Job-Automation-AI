@@ -51,8 +51,16 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 def init_db():
     """Initialize database tables"""
-    Base.metadata.create_all(bind=engine)
-    print("✅ Database tables created successfully")
+    try:
+        # Ensure data directory exists
+        db_path = Path('./data')
+        db_path.mkdir(parents=True, exist_ok=True)
+        
+        Base.metadata.create_all(bind=engine)
+        print("✅ Database tables created successfully")
+    except Exception as e:
+        print(f"⚠️ Database initialization error: {e}")
+        print("Continuing without database initialization...")
 
 
 def drop_db():
