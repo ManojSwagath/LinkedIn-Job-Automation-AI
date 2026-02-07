@@ -1,9 +1,13 @@
 # Core Framework
-fastapi==0.115.0
-uvicorn[standard]==0.32.0
+
 pydantic==2.9.2
 pydantic-settings==2.6.1
 python-dotenv==1.0.1
+fastapi==0.109.2
+uvicorn==0.27.1
+supabase==2.3.4
+
+
 
 # Web Automation
 playwright==1.48.0
@@ -13,7 +17,7 @@ selenium==4.27.1
 sqlalchemy==2.0.36
 alembic==1.14.0
 psycopg2-binary==2.9.10
-supabase==2.10.0
+supabase==2.3.4
 
 
 # AI & LLM
@@ -24,7 +28,12 @@ google-generativeai==0.8.3
 openai==1.57.4
 
 # Vector Store
+<<<<<<< HEAD
 faiss-cpu==1.9.0.post1
+=======
+faiss-cpu==1.7.4
+
+>>>>>>> d3692bdee47451913db9061cfed779c1ee52209b
 chromadb==0.5.23
 
 
@@ -35,9 +44,19 @@ beautifulsoup4==4.12.3
 lxml==5.3.0
 
 # API & HTTP
+<<<<<<< HEAD
 httpx==0.28.1
 aiohttp==3.11.11
 requests==2.32.3
+=======
+
+aiohttp==3.11.11
+requests==2.32.3
+httpx==0.25.2
+aiohttp==3.9.3
+requests==2.31.0
+
+>>>>>>> d3692bdee47451913db9061cfed779c1ee52209b
 
 # Utilities
 python-multipart==0.0.9
