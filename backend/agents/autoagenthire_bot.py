@@ -20,7 +20,7 @@ from playwright.sync_api import sync_playwright, Page as SyncPage, Browser as Sy
 from playwright.async_api import async_playwright, Page, Browser, BrowserContext
 from backend.automation.application_handler import ApplicationHandler
 import google.generativeai as genai  # type: ignore
-from PyPDF2 import PdfReader
+from pypdf import PdfReader
 from dotenv import load_dotenv
 import os
 
