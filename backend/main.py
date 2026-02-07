@@ -2,6 +2,13 @@
 Main FastAPI application entry point.
 Initializes the application, middleware, and routes.
 """
+import sys
+import asyncio
+
+# Windows-specific: Ensure ProactorEventLoop is used for subprocess compatibility
+if sys.platform == 'win32':
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+
 from typing import Optional, Dict, Any
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError

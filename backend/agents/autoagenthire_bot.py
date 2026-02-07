@@ -8,10 +8,15 @@ import random
 import re
 import time
 import json
-from typing import List, Dict, Optional
+import sys
+import concurrent.futures
+from typing import List, Dict, Optional, Any
 from datetime import datetime
 from pathlib import Path
+from functools import partial
 
+# Use sync_playwright for Windows compatibility
+from playwright.sync_api import sync_playwright, Page as SyncPage, Browser as SyncBrowser, BrowserContext as SyncBrowserContext
 from playwright.async_api import async_playwright, Page, Browser, BrowserContext
 from backend.automation.application_handler import ApplicationHandler
 import google.generativeai as genai  # type: ignore
@@ -21,6 +26,9 @@ import os
 
 # Load .env but don't override existing environment variables
 load_dotenv(override=False)
+
+# Thread pool executor for sync playwright operations
+_playwright_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="playwright")
 
 
 class AutoAgentHireBot:
@@ -35,6 +43,13 @@ class AutoAgentHireBot:
         self.jobs_data = []
         self.applied_jobs = []
         self.errors = []
+        
+        # Sync playwright objects (for Windows compatibility)
+        self._sync_playwright: Any = None
+        self._sync_browser: Optional[SyncBrowser] = None
+        self._sync_context: Optional[SyncBrowserContext] = None
+        self._sync_page: Optional[SyncPage] = None
+        self._use_sync_mode = sys.platform == 'win32'  # Use sync mode on Windows
         
         # Store credentials from config if provided (takes priority over env)
         self.linkedin_email = config.get('linkedin_email') or os.getenv('LINKEDIN_EMAIL')
@@ -51,8 +66,36 @@ class AutoAgentHireBot:
         else:
             self.ai_model = None
 
+    async def _run_sync(self, func, *args, **kwargs) -> Any:
+        """Run a sync function in the thread executor."""
+        loop = asyncio.get_event_loop()
+        if kwargs:
+            return await loop.run_in_executor(_playwright_executor, partial(func, *args, **kwargs))
+        return await loop.run_in_executor(_playwright_executor, partial(func, *args))
+    
+    def _get_page(self) -> SyncPage:
+        """Get the sync page object (for Windows mode)."""
+        if not self._sync_page:
+            raise Exception("Browser not initialized")
+        return self._sync_page
+    
     async def close(self) -> None:
         """Close any open Playwright resources (page/context/browser) safely."""
+        # Close sync playwright resources (Windows mode)
+        if self._use_sync_mode and self._sync_playwright:
+            try:
+                loop = asyncio.get_event_loop()
+                await loop.run_in_executor(_playwright_executor, self._close_sync_resources)
+            except Exception as e:
+                print(f"⚠️ Error closing sync playwright: {e}")
+            finally:
+                self._sync_playwright = None
+                self._sync_browser = None
+                self._sync_context = None
+                self._sync_page = None
+                self.page = None
+            return
+        
         # Close context first (covers both persistent and non-persistent cases)
         if self.context:
             try:
@@ -71,6 +114,120 @@ class AutoAgentHireBot:
             finally:
                 self.browser = None
     
+    def _close_sync_resources(self) -> None:
+        """Close sync playwright resources (runs in thread executor)."""
+        try:
+            if self._sync_context:
+                self._sync_context.close()
+        except Exception:
+            pass
+        try:
+            if self._sync_browser:
+                self._sync_browser.close()
+        except Exception:
+            pass
+        try:
+            if self._sync_playwright:
+                self._sync_playwright.stop()
+        except Exception:
+            pass
+
+    def _init_sync_browser(self, use_persistent_profile: bool = True) -> None:
+        """Initialize sync playwright browser (runs in thread executor on Windows)."""
+        print("🌐 Initializing browser (sync mode for Windows)...")
+        
+        self._sync_playwright = sync_playwright().start()
+        
+        # Profile directory setup
+        profile_dir = Path("browser_profile")
+        profile_dir.mkdir(exist_ok=True)
+        
+        # Clean up lock files
+        for lock_name in ["SingletonLock", "SingletonSocket", "SingletonCookie"]:
+            lock_file = profile_dir / lock_name
+            if lock_file.exists():
+                try:
+                    lock_file.unlink()
+                    print(f"🧹 Cleaned up stale lock file: {lock_name}")
+                except Exception as e:
+                    print(f"⚠️ Could not remove {lock_name}: {str(e)}")
+        
+        headless_mode = os.getenv('HEADLESS_BROWSER', 'false').lower() == 'true'
+        slow_mo_delay = int(os.getenv('BROWSER_SLOW_MO', '50'))
+        
+        browser_args = [
+            '--disable-blink-features=AutomationControlled',
+            '--disable-dev-shm-usage',
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-web-security',
+            '--disable-features=IsolateOrigins,site-per-process',
+            '--disable-gpu',
+            '--disable-software-rasterizer',
+            '--disable-extensions',
+            '--disable-background-networking',
+            '--disable-background-timer-throttling',
+            '--disable-backgrounding-occluded-windows',
+            '--disable-renderer-backgrounding',
+            '--disable-features=TranslateUI,BlinkGenPropertyTrees',
+            '--no-first-run',
+            '--no-default-browser-check',
+        ]
+        
+        if use_persistent_profile:
+            print(f"🔐 Using persistent browser profile: {profile_dir}")
+            self._sync_context = self._sync_playwright.chromium.launch_persistent_context(
+                str(profile_dir),
+                headless=headless_mode,
+                slow_mo=slow_mo_delay,
+                args=browser_args,
+                viewport={'width': 1920, 'height': 1080},
+                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                locale='en-US',
+                timezone_id='America/New_York',
+                ignore_https_errors=True,
+            )
+            if len(self._sync_context.pages) > 0:
+                self._sync_page = self._sync_context.pages[0]
+                print("✅ Using existing browser page")
+            else:
+                self._sync_page = self._sync_context.new_page()
+                print("✅ Created new browser page")
+        else:
+            print("🌐 Launching browser in non-persistent mode...")
+            self._sync_browser = self._sync_playwright.chromium.launch(
+                headless=headless_mode,
+                slow_mo=slow_mo_delay,
+                args=browser_args
+            )
+            self._sync_context = self._sync_browser.new_context(
+                viewport={'width': 1920, 'height': 1080},
+                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                locale='en-US',
+                timezone_id='America/New_York',
+                ignore_https_errors=True,
+            )
+            self._sync_page = self._sync_context.new_page()
+            print("✅ Created new browser page")
+        
+        # Set timeouts
+        self._sync_page.set_default_timeout(60000)
+        self._sync_page.set_default_navigation_timeout(60000)
+        
+        # Anti-detection script
+        self._sync_context.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+            Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
+            Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
+            window.chrome = {runtime: {}};
+        """)
+        
+        # Test navigation
+        print("🧪 Testing browser navigation...")
+        self._sync_page.goto('about:blank', wait_until='domcontentloaded', timeout=10000)
+        print("✅ Browser initialized successfully with anti-detection")
+        print(f"📍 Current URL: {self._sync_page.url}")
+    
     async def initialize_browser(self, use_persistent_profile: bool = True) -> None:
         """
         Initialize Playwright browser with anti-detection and optional persistent profile.
@@ -79,6 +236,20 @@ class AutoAgentHireBot:
             use_persistent_profile: If True, uses a persistent browser profile to reduce CAPTCHAs
         """
         print("🌐 Initializing browser...")
+        
+        # On Windows, use sync playwright in thread executor to avoid event loop issues
+        if self._use_sync_mode:
+            try:
+                loop = asyncio.get_event_loop()
+                await loop.run_in_executor(
+                    _playwright_executor, 
+                    partial(self._init_sync_browser, use_persistent_profile)
+                )
+                print("✅ Browser initialized (Windows sync mode)")
+                return
+            except Exception as e:
+                print(f"❌ Sync browser initialization failed: {str(e)}")
+                raise Exception(f"Failed to initialize browser: {str(e)}")
         
         try:
             playwright = await async_playwright().start()
@@ -230,6 +401,10 @@ class AutoAgentHireBot:
     
     async def login_linkedin(self) -> bool:
         """Login to LinkedIn with credentials from .env"""
+        # Use sync mode for Windows
+        if self._use_sync_mode:
+            return await self._run_sync(self._login_linkedin_sync)
+        
         if not self.page:
             raise Exception("Browser not initialized")
             
@@ -418,8 +593,124 @@ class AutoAgentHireBot:
             self.errors.append(f"Login failed: {str(e)}")
             return False
     
+    def _login_linkedin_sync(self) -> bool:
+        """Sync version of login_linkedin for Windows."""
+        page = self._get_page()
+        
+        try:
+            email = self.linkedin_email
+            password = self.linkedin_password
+            
+            if not email or not password:
+                raise Exception("LinkedIn credentials not found")
+            
+            # Check for placeholder values
+            if 'your-email' in (email or "").lower() or 'example.com' in (email or "").lower():
+                raise Exception("LinkedIn credentials look like placeholders")
+            
+            print(f"🔐 Using LinkedIn account: {email[:3]}***@{email.split('@')[1] if '@' in email else 'email.com'}")
+            print("🔐 Navigating to LinkedIn login...")
+            
+            try:
+                page.goto('https://www.linkedin.com/login', wait_until='load', timeout=60000)
+            except:
+                page.goto('https://www.linkedin.com/login', wait_until='domcontentloaded', timeout=60000)
+            
+            time.sleep(random.uniform(2, 3))
+            
+            # Check if already logged in
+            current_url = page.url
+            if any(path in current_url for path in ['feed', 'mynetwork', 'in/', 'jobs']):
+                print(f"✅ Already logged in (URL: {current_url})")
+                return True
+            
+            # Wait for login form
+            print("⏳ Waiting for login form...")
+            email_selectors = ['input[name="session_key"]', 'input#username']
+            password_selectors = ['input[name="session_password"]', 'input#password']
+            
+            email_input = None
+            for sel in email_selectors:
+                try:
+                    page.wait_for_selector(sel, state='visible', timeout=5000)
+                    email_input = page.locator(sel)
+                    break
+                except:
+                    continue
+            
+            password_input = None
+            for sel in password_selectors:
+                try:
+                    page.wait_for_selector(sel, state='visible', timeout=5000)
+                    password_input = page.locator(sel)
+                    break
+                except:
+                    continue
+            
+            if not email_input or not password_input:
+                raise Exception("Could not find LinkedIn login fields")
+            
+            # Fill email
+            print(f"📧 Entering email...")
+            email_input.click()
+            email_input.clear()
+            time.sleep(random.uniform(0.5, 1))
+            email_input.type(email, delay=random.uniform(80, 150))
+            time.sleep(random.uniform(1.5, 2.5))
+            
+            # Fill password
+            print("🔑 Entering password...")
+            password_input.click()
+            password_input.clear()
+            time.sleep(random.uniform(0.5, 1))
+            password_input.type(password, delay=random.uniform(80, 150))
+            time.sleep(random.uniform(1.5, 2.5))
+            
+            # Click sign in
+            print("👆 Clicking Sign In button...")
+            page.click('button[type="submit"]')
+            
+            # Wait for navigation
+            print("⏳ Waiting for login to complete...")
+            time.sleep(random.uniform(4, 6))
+            
+            current_url = page.url
+            print(f"📍 Current URL after login: {current_url}")
+            
+            # Check for successful login
+            success_paths = ['feed', 'mynetwork', 'in/', 'check/add-phone', 'jobs']
+            if any(path in current_url for path in success_paths):
+                print(f"✅ Successfully logged into LinkedIn")
+                return True
+            
+            # Check for security checkpoint
+            if 'checkpoint' in current_url or 'challenge' in current_url:
+                print("⚠️ Security checkpoint detected - may need manual intervention")
+                time.sleep(30)  # Wait for user to solve CAPTCHA
+                current_url = page.url
+                if any(path in current_url for path in success_paths):
+                    print("✅ Checkpoint passed, logged in successfully")
+                    return True
+            
+            if '/login' not in current_url:
+                print("✅ Successfully logged into LinkedIn (navigated away from login)")
+                return True
+            
+            print("❌ Login failed")
+            return False
+            
+        except Exception as e:
+            print(f"❌ Login error: {str(e)}")
+            self.errors.append(f"Login failed: {str(e)}")
+            return False
+    
     async def search_jobs(self, keyword: str, location: str) -> None:
         """Search for jobs with Easy Apply filter - ALWAYS uses direct URL method"""
+        # Use sync mode for Windows
+        if self._use_sync_mode:
+            await self._run_sync(self._search_jobs_sync, keyword, location)
+            return
+        
         if not self.page or self.page.is_closed():
             # If context exists, we can recover by opening a new page.
             if self.context:
@@ -522,6 +813,55 @@ class AutoAgentHireBot:
             self.errors.append(f"Search failed: {str(e)}")
             raise
     
+    def _search_jobs_sync(self, keyword: str, location: str) -> None:
+        """Sync version of search_jobs for Windows."""
+        page = self._get_page()
+        
+        try:
+            print(f"🔍 Searching for '{keyword}' jobs in '{location}' (Easy Apply only)...")
+            
+            import urllib.parse
+            encoded_keyword = urllib.parse.quote(keyword)
+            encoded_location = urllib.parse.quote(location)
+            
+            # Include Easy Apply filter in URL
+            search_url = f'https://www.linkedin.com/jobs/search/?keywords={encoded_keyword}&location={encoded_location}&f_AL=true&sortBy=R'
+            
+            print(f"📍 Using direct URL: {search_url}")
+            
+            try:
+                page.goto(search_url, wait_until='load', timeout=60000)
+                print("✅ Navigated to jobs page")
+            except:
+                page.goto(search_url, wait_until='domcontentloaded', timeout=60000)
+                print("✅ Navigated with domcontentloaded")
+            
+            time.sleep(random.uniform(3, 5))
+            
+            # Wait for job cards to load
+            job_card_selectors = [
+                '.jobs-search-results-list',
+                '.scaffold-layout__list',
+                '[data-job-id]',
+                '.job-card-container',
+            ]
+            
+            for selector in job_card_selectors:
+                try:
+                    page.wait_for_selector(selector, timeout=10000)
+                    print(f"✅ Found job cards using: {selector}")
+                    break
+                except:
+                    continue
+            
+            print("✅ Job search completed successfully")
+            print(f"📊 Ready to collect Easy Apply jobs for: {keyword}")
+            
+        except Exception as e:
+            print(f"❌ Search error: {str(e)}")
+            self.errors.append(f"Search failed: {str(e)}")
+            raise
+    
     async def _apply_filter(self, filter_name: str, value: str) -> None:
         """Helper to apply a specific filter"""
         if not self.page:
@@ -560,6 +900,10 @@ class AutoAgentHireBot:
     
     async def collect_job_listings(self, max_jobs: int = 30) -> List[Dict]:
         """Scroll and collect job listings"""
+        # Use sync mode for Windows
+        if self._use_sync_mode:
+            return await self._run_sync(self._collect_job_listings_sync, max_jobs)
+        
         if not self.page:
             raise Exception("Browser not initialized")
             
@@ -803,6 +1147,122 @@ class AutoAgentHireBot:
             self.errors.append("Job collection failed")
             return jobs
 
+    def _collect_job_listings_sync(self, max_jobs: int = 30) -> List[Dict]:
+        """Sync version of collect_job_listings for Windows."""
+        page = self._get_page()
+        jobs = []
+        
+        try:
+            print(f"📊 Collecting up to {max_jobs} job listings...")
+            
+            # Scroll to load more jobs
+            for scroll in range(5):
+                page.evaluate('window.scrollTo(0, document.body.scrollHeight)')
+                time.sleep(2)
+            
+            # Get job cards
+            job_cards = page.query_selector_all('div.job-card-container')
+            
+            if not job_cards:
+                job_cards = page.query_selector_all('li.jobs-search-results__list-item')
+            
+            print(f"🔢 Found {len(job_cards)} job cards")
+            
+            for i, card in enumerate(job_cards[:max_jobs]):
+                try:
+                    if len(jobs) >= max_jobs:
+                        break
+                    
+                    # Click job card
+                    try:
+                        card.scroll_into_view_if_needed()
+                        time.sleep(0.2)
+                        card.click(timeout=6000)
+                        time.sleep(random.uniform(1, 2))
+                    except Exception as click_error:
+                        print(f"⚠️ Could not click job card {i+1}: {str(click_error)}")
+                        continue
+                    
+                    # Extract details
+                    title = None
+                    company = None
+                    location = None
+                    
+                    # Get title
+                    for selector in ['h1.job-details-jobs-unified-top-card__job-title', 'h1.t-24', 'h1']:
+                        try:
+                            title = page.text_content(selector, timeout=3000)
+                            if title and title.strip():
+                                break
+                        except:
+                            continue
+                    
+                    # Get company
+                    for selector in ['a.job-details-jobs-unified-top-card__company-name', 'span.job-details-jobs-unified-top-card__company-name']:
+                        try:
+                            company = page.text_content(selector, timeout=2000)
+                            if company and company.strip():
+                                break
+                        except:
+                            continue
+                    
+                    # Get location
+                    for selector in ['span.job-details-jobs-unified-top-card__primary-description', 'span.job-details-jobs-unified-top-card__bullet']:
+                        try:
+                            location = page.text_content(selector, timeout=2000)
+                            if location and location.strip():
+                                break
+                        except:
+                            continue
+                    
+                    # Get URL
+                    url = page.url
+                    
+                    # Check Easy Apply
+                    easy_apply = False
+                    for selector in ['button.jobs-apply-button', 'button[aria-label*="Easy Apply"]']:
+                        try:
+                            page.wait_for_selector(selector, timeout=2000)
+                            easy_apply = True
+                            break
+                        except:
+                            continue
+                    
+                    if title and title.strip():
+                        # Get description
+                        description = ''
+                        try:
+                            desc_elem = page.query_selector('div.jobs-description__content')
+                            if desc_elem:
+                                description = desc_elem.inner_text()[:500]
+                        except:
+                            pass
+                        
+                        job_data = {
+                            'title': title.strip(),
+                            'company': company.strip() if company else 'Unknown Company',
+                            'location': location.strip() if location else 'Unknown Location',
+                            'url': url,
+                            'easy_apply': easy_apply,
+                            'description': description,
+                            'index': i + 1
+                        }
+                        jobs.append(job_data)
+                        print(f"✅ Job {len(jobs)}: {title.strip()[:50]}... at {company.strip()[:30] if company else 'Unknown'}...")
+                        
+                except Exception:
+                    print(f"⚠️ Error extracting job {i+1}")
+                    continue
+            
+            self.jobs_data = jobs
+            print(f"📋 Total jobs collected: {len(jobs)}")
+            return jobs
+            
+        except Exception as e:
+            print(f"❌ Collection error: {str(e)}")
+            self.errors.append("Job collection failed")
+            return jobs
+
     async def _dismiss_overlays(self) -> None:
         """Best-effort: close LinkedIn overlays/modals that intercept pointer events."""
         if not self.page:
@@ -968,6 +1428,10 @@ Return this exact JSON structure:
         Returns:
             Dictionary with application status and details
         """
+        # Use sync mode for Windows
+        if self._use_sync_mode:
+            return await self._run_sync(self._auto_apply_job_sync, job)
+        
         if not self.page:
             raise Exception("Browser not initialized")
             
@@ -1040,6 +1504,221 @@ Return this exact JSON structure:
                 pass
             
             return job
+
+    def _auto_apply_job_sync(self, job: Dict) -> Dict:
+        """Sync version of auto_apply_job for Windows."""
+        page = self._get_page()
+        
+        print(f"\n🚀 Applying to: {job['title']} at {job['company']}")
+        print(f"   🔗 URL: {job['url']}")
+        
+        dry_run = bool(self.config.get('dry_run', False))
+        
+        try:
+            # Step 1: Navigate to job URL
+            print("📍 Step 1: Opening job detail page...")
+            job_url = job.get('url')
+            if not job_url:
+                raise Exception("Job URL missing")
+            
+            page.goto(job_url, wait_until='load', timeout=60000)
+            time.sleep(random.uniform(2, 3))
+            
+            # Step 2: Click Easy Apply button
+            print("📍 Step 2: Clicking Easy Apply...")
+            easy_apply_clicked = False
+            for selector in ['button.jobs-apply-button', 'button[aria-label*="Easy Apply"]', 'button:has-text("Easy Apply")']:
+                try:
+                    btn = page.locator(selector).first
+                    if btn.is_visible():
+                        btn.click()
+                        easy_apply_clicked = True
+                        print("✅ Easy Apply clicked")
+                        break
+                except:
+                    continue
+            
+            if not easy_apply_clicked:
+                raise Exception("Could not find Easy Apply button")
+            
+            time.sleep(2)
+            
+            # Step 3: Complete the multi-step form
+            print("📍 Step 3: Completing application form...")
+            result = self._complete_easy_apply_flow_sync(page, dry_run=dry_run)
+            
+            # Update job status
+            job['applied_at'] = datetime.now().isoformat()
+            job['dry_run'] = dry_run
+            job['application_steps'] = result.get('steps', [])
+            job['application_errors'] = result.get('errors', [])
+            
+            if result.get('status') == 'APPLIED':
+                job['application_status'] = 'APPLIED'
+                job['application_reason'] = 'Application submitted successfully'
+                print(f"🎉 SUCCESS: Application submitted to {job['title']}!")
+                self.applied_jobs.append(job)
+            elif result.get('status') == 'DRY_RUN':
+                job['application_status'] = 'DRY_RUN'
+                job['application_reason'] = 'Dry run completed (no final submit)'
+                print(f"🧪 DRY RUN: Reached final step (did not submit)")
+            else:
+                job['application_status'] = 'FAILED'
+                job['application_reason'] = result.get('reason', 'Application failed')
+                print(f"❌ FAILED: {job['application_reason']}")
+            
+            return job
+            
+        except Exception as e:
+            print(f"❌ FAILED: Application error - {str(e)}")
+            job['application_status'] = 'FAILED'
+            job['application_reason'] = str(e)
+            job['applied_at'] = datetime.now().isoformat()
+            self.errors.append(f"Failed to apply to {job['title']}: {str(e)}")
+            
+            # Try to close modal
+            try:
+                close_btn = page.query_selector('button[aria-label*="Dismiss"]')
+                if close_btn:
+                    close_btn.click()
+            except:
+                pass
+            
+            return job
+    
+    def _complete_easy_apply_flow_sync(self, page: SyncPage, dry_run: bool = False, max_steps: int = 10) -> Dict:
+        """Sync version of Easy Apply wizard handler for Windows."""
+        steps = []
+        errors = []
+        
+        try:
+            for i in range(max_steps):
+                print(f"\n📍 EASY APPLY STEP {i+1}/{max_steps}")
+                time.sleep(1)
+                
+                # Check for success/completion indicators
+                success_selectors = [
+                    'text=Application sent',
+                    'text=application was sent',
+                    'h2:has-text("Application sent")',
+                    '[data-test-modal-close-btn]'
+                ]
+                for selector in success_selectors:
+                    try:
+                        if page.locator(selector).first.is_visible(timeout=1000):
+                            print("🎉 Application submitted successfully!")
+                            return {"status": "APPLIED", "steps": steps, "errors": errors}
+                    except:
+                        continue
+                
+                # Fill form fields
+                self._fill_form_fields_sync(page)
+                
+                # Find submit/next button
+                submit_button = None
+                submit_type = None
+                
+                button_selectors = [
+                    ('button:has-text("Submit application")', 'submit'),
+                    ('button[aria-label*="Submit application"]', 'submit'),
+                    ('button:has-text("Review")', 'review'),
+                    ('button:has-text("Next")', 'next'),
+                    ('button[aria-label*="Continue"]', 'next'),
+                ]
+                
+                for selector, btn_type in button_selectors:
+                    try:
+                        btn = page.locator(selector).first
+                        if btn.is_visible(timeout=1000) and btn.is_enabled():
+                            submit_button = btn
+                            submit_type = btn_type
+                            break
+                    except:
+                        continue
+                
+                if submit_button:
+                    print(f"   Found button: {submit_type}")
+                    
+                    if submit_type == 'submit':
+                        if dry_run:
+                            print("🧪 DRY RUN: Would submit here but skipping")
+                            return {"status": "DRY_RUN", "steps": steps, "errors": errors}
+                        else:
+                            submit_button.click()
+                            time.sleep(3)
+                            print("📤 Submit clicked!")
+                            steps.append({"name": "submit", "detail": "Clicked submit"})
+                            # Check for success
+                            time.sleep(2)
+                            return {"status": "APPLIED", "steps": steps, "errors": errors}
+                    else:
+                        submit_button.click()
+                        time.sleep(2)
+                        steps.append({"name": submit_type, "detail": f"Clicked {submit_type}"})
+                else:
+                    print("⚠️ No actionable button found")
+                    errors.append("no_action_button")
+                    break
+            
+            return {"status": "FAILED", "reason": "Max steps reached", "steps": steps, "errors": errors}
+            
+        except Exception as e:
+            return {"status": "FAILED", "reason": str(e), "steps": steps, "errors": errors}
+    
+    def _fill_form_fields_sync(self, page: SyncPage) -> None:
+        """Fill form fields in sync mode."""
+        try:
+            # Fill text inputs
+            text_inputs = page.query_selector_all('input[type="text"]:not([readonly]), input:not([type]):not([readonly])')
+            for input_elem in text_inputs:
+                try:
+                    if not input_elem.input_value():
+                        label = input_elem.get_attribute('aria-label') or input_elem.get_attribute('name') or ''
+                        label_lower = label.lower()
+                        
+                        value = ''
+                        if 'name' in label_lower or 'full name' in label_lower:
+                            value = self.user_profile.get('full_name', 'Candidate')
+                        elif 'email' in label_lower:
+                            value = self.linkedin_email or self.user_profile.get('email', '')
+                        elif 'phone' in label_lower or 'mobile' in label_lower:
+                            value = self.user_profile.get('phone', '')
+                        elif 'city' in label_lower:
+                            value = self.user_profile.get('city', 'New York')
+                        elif 'year' in label_lower and 'experience' in label_lower:
+                            value = str(self.user_profile.get('years_experience', '3'))
+                        elif 'linkedin' in label_lower:
+                            value = f"https://www.linkedin.com/in/{self.linkedin_email.split('@')[0] if self.linkedin_email else 'profile'}"
+                        
+                        if value:
+                            input_elem.fill(value)
+                            print(f"   Filled: {label[:30]}...")
+                except:
+                    continue
+            
+            # Handle dropdowns/selects
+            selects = page.query_selector_all('select')
+            for select in selects:
+                try:
+                    options = select.query_selector_all('option')
+                    if len(options) > 1:
+                        # Select first non-empty option
+                        options[1].click()
+                except:
+                    continue
+            
+            # Handle radio buttons - select first option
+            radio_groups = page.query_selector_all('[role="radiogroup"]')
+            for group in radio_groups:
+                try:
+                    first_radio = group.query_selector('input[type="radio"]')
+                    if first_radio and not first_radio.is_checked():
+                        first_radio.click()
+                except:
+                    continue
+                    
+        except Exception as e:
+            print(f"⚠️ Error filling form: {str(e)}")
 
     async def _complete_easy_apply_flow(self, dry_run: bool = False, max_steps: int = 10) -> Dict:
         """Best-effort Easy Apply wizard handler.

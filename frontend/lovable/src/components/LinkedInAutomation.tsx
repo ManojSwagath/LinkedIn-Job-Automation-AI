@@ -563,7 +563,7 @@ export default function LinkedInAutomation() {
                   className="flex items-start gap-3 p-4 border rounded-lg hover:bg-muted/50 transition-colors"
                 >
                   <div className="mt-1">
-                    {result.status === 'APPLIED' ? (
+                    {result.status === 'APPLIED' || result.status === 'DRY_RUN' ? (
                       <CheckCircle className="w-5 h-5 text-green-600" />
                     ) : (
                       <XCircle className="w-5 h-5 text-red-600" />
@@ -588,11 +588,11 @@ export default function LinkedInAutomation() {
                   </div>
                   <div className="text-right">
                     <span className={`inline-block px-2 py-1 text-xs rounded-full ${
-                      result.status === 'APPLIED' 
+                      result.status === 'APPLIED' || result.status === 'DRY_RUN'
                         ? 'bg-green-100 text-green-800' 
                         : 'bg-red-100 text-red-800'
                     }`}>
-                      {result.status}
+                      {result.status === 'DRY_RUN' ? 'READY TO APPLY' : result.status}
                     </span>
                   </div>
                 </div>

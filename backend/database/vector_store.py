@@ -52,14 +52,9 @@ class VectorStoreManager:
         self.embedding_model_name = "all-MiniLM-L6-v2"
         self.dimension = 384  # all-MiniLM-L6-v2 dimension
         
-        # Initialize embedding model
+        # Initialize embedding model (lazy loading)
         self.embedding_model = None
-        if SENTENCE_TRANSFORMERS_AVAILABLE:
-            try:
-                self.embedding_model = SentenceTransformer(self.embedding_model_name)
-                print(f"✅ Loaded embedding model: {self.embedding_model_name}")
-            except Exception as e:
-                print(f"⚠️ Could not load embedding model: {e}")
+        self._model_loaded = False
         
         # Initialize FAISS indexes
         self.resume_index = None
@@ -92,6 +87,17 @@ class VectorStoreManager:
             self.job_mapping = {}
             print("✅ Created new job index")
     
+    def _ensure_model_loaded(self):
+        """Lazy load the embedding model when first needed"""
+        if not self._model_loaded and SENTENCE_TRANSFORMERS_AVAILABLE:
+            try:
+                self.embedding_model = SentenceTransformer(self.embedding_model_name)
+                self._model_loaded = True
+                print(f"✅ Loaded embedding model: {self.embedding_model_name}")
+            except Exception as e:
+                print(f"⚠️ Could not load embedding model: {e}")
+                self._model_loaded = True  # Mark as attempted to avoid repeated failures
+    
     def _load_mapping(self, path: Path) -> Dict:
         """Load index to ID mapping from pickle file"""
         if path.exists():
@@ -108,6 +114,9 @@ class VectorStoreManager:
         """Generate embedding for text using sentence transformer"""
         if not text or not text.strip():
             return None
+        
+        # Lazy load the model
+        self._ensure_model_loaded()
         
         if self.embedding_model:
             try:

@@ -3,6 +3,8 @@ V2 API Routes - Frontend Compatible Endpoints
 """
 
 import asyncio
+import subprocess
+import sys
 import uuid
 import json
 from pathlib import Path
@@ -137,8 +139,153 @@ async def start_automation_v2(
     }
 
 
+async def run_playwright_subprocess(session_id: str, config: dict):
+    """Run Playwright in a subprocess to avoid event loop conflicts on Windows"""
+    import threading
+    
+    task = active_tasks[session_id]
+    
+    def run_in_thread():
+        """Run subprocess in a separate thread to avoid asyncio conflicts"""
+        try:
+            # Build config for the subprocess
+            subprocess_config = {
+                "linkedin_email": config.get("linkedin_email"),
+                "linkedin_password": config.get("linkedin_password"),
+                "keyword": config.get("keyword", "Software Engineer"),
+                "location": config.get("location", "Remote"),
+                "max_applications": config.get("max_applications", 5),
+                "dry_run": config.get("dry_run", True),
+                "headless": config.get("headless", False),
+                "user_profile": config.get("user_profile", {}),
+            }
+            
+            config_json = json.dumps(subprocess_config)
+            
+            # Run the playwright_runner.py script
+            runner_path = Path(__file__).parent.parent / "playwright_runner.py"
+            python_exe = sys.executable
+            
+            print(f"🚀 Starting Playwright subprocess: {runner_path}")
+            print(f"🐍 Python: {python_exe}")
+            print(f"📂 CWD: {Path(__file__).parent.parent.parent}")
+            
+            task["status"] = "running"
+            task["phase"] = "subprocess_started"
+            
+            # Use subprocess.Popen with threading instead of asyncio
+            process = subprocess.Popen(
+                [python_exe, str(runner_path), config_json],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                cwd=str(Path(__file__).parent.parent.parent),
+                text=True,
+                bufsize=1
+            )
+            
+            # Stream output
+            output_lines = []
+            for line in iter(process.stdout.readline, ''):
+                if not line:
+                    break
+                line_str = line.strip()
+                output_lines.append(line_str)
+                print(f"[SUBPROCESS] {line_str}")
+                
+                # Update task status based on output
+                if "Browser initialized" in line_str:
+                    task["phase"] = "browser_initialized"
+                elif "Login successful" in line_str or "Already logged in" in line_str:
+                    task["phase"] = "logged_in"
+                elif "Searching for jobs" in line_str:
+                    task["phase"] = "searching_jobs"
+                elif "Collected" in line_str and "jobs" in line_str:
+                    task["phase"] = "jobs_collected"
+                    try:
+                        import re
+                        match = re.search(r'Collected (\d+) jobs', line_str)
+                        if match:
+                            task["jobs_found"] = int(match.group(1))
+                            task["total_jobs"] = min(int(match.group(1)), config.get("max_applications", 5))
+                    except:
+                        pass
+                elif "Applying to:" in line_str:
+                    task["phase"] = "applying"
+                    task["current_job"] = task.get("current_job", 0) + 1
+                    task["current_job_title"] = line_str.split("Applying to:")[-1].strip()[:50]
+                elif "Application submitted" in line_str or "[SUCCESS]" in line_str:
+                    task["applications_submitted"] = task.get("applications_submitted", 0) + 1
+                elif "DRY RUN" in line_str:
+                    task["applications_submitted"] = task.get("applications_submitted", 0) + 1
+            
+            process.wait()
+            
+            # Parse result JSON from output - find the JSON block after ===RESULT_JSON===
+            result_json = None
+            json_started = False
+            json_lines = []
+            for line in output_lines:
+                if "===RESULT_JSON===" in line:
+                    json_started = True
+                    continue
+                if json_started:
+                    # Stop at first non-JSON line (exception traces, etc)
+                    if line.startswith("Exception") or line.startswith("Traceback"):
+                        break
+                    json_lines.append(line)
+            
+            if json_lines:
+                result_json = "\n".join(json_lines)
+            
+            if result_json:
+                try:
+                    result = json.loads(result_json)
+                    automation_results[session_id]["results"] = [
+                        {
+                            "title": app.get("title", "Unknown"),
+                            "company": app.get("company", "Unknown"),
+                            "status": "applied" if app.get("status") in ["APPLIED", "DRY_RUN"] else "failed",
+                            "reason": app.get("error", ""),
+                            "appliedAt": datetime.now().isoformat(),
+                        }
+                        for app in result.get("applications", [])
+                    ]
+                    task["applications_submitted"] = len([a for a in result.get("applications", []) if a.get("status") in ["APPLIED", "DRY_RUN"]])
+                    task["applications_failed"] = len([a for a in result.get("applications", []) if a.get("status") not in ["APPLIED", "DRY_RUN"]])
+                except json.JSONDecodeError as e:
+                    print(f"Failed to parse result JSON: {e}")
+                    pass
+            
+            task["status"] = "completed"
+            task["phase"] = "finished"
+            
+            print(f"\n{'='*60}")
+            print(f"✅ SUBPROCESS AUTOMATION COMPLETE")
+            print(f"{'='*60}")
+            
+        except Exception as e:
+            import traceback
+            print(f"\n❌ SUBPROCESS ERROR: {str(e)}")
+            traceback.print_exc()
+            task["status"] = "failed"
+            task["error"] = str(e)
+    
+    # Start thread and return immediately
+    thread = threading.Thread(target=run_in_thread, daemon=True)
+    thread.start()
+
+
 async def run_automation_v2(session_id: str, config: dict):
-    """Run the automation workflow"""
+    """Run the automation workflow - uses subprocess on Windows to avoid event loop issues"""
+    
+    # On Windows, use subprocess approach to avoid Playwright event loop conflicts
+    import platform
+    if platform.system() == "Windows":
+        print("🪟 Windows detected - using subprocess for Playwright")
+        await run_playwright_subprocess(session_id, config)
+        return
+    
+    # On other platforms, use direct async approach
     bot = None
     try:
         task = active_tasks[session_id]
