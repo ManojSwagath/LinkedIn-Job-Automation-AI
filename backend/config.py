@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     
     # API
     API_HOST: str = "0.0.0.0"
-    API_PORT: int = 8000
+    API_PORT: int = Field(default=8000, validation_alias="PORT")  # Support both API_PORT and PORT (for Render)
     API_RELOAD: bool = True
     
     # Security
