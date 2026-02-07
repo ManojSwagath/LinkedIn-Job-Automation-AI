@@ -15,6 +15,7 @@ alembic==1.14.0
 psycopg2-binary==2.9.10
 supabase==2.10.0
 
+
 # AI & LLM
 langchain==0.3.13
 langchain-community==0.3.13
@@ -34,9 +35,15 @@ beautifulsoup4==4.12.3
 lxml==5.3.0
 
 # API & HTTP
+<<<<<<< HEAD
 httpx==0.28.1
 aiohttp==3.11.11
 requests==2.32.3
+=======
+httpx==0.25.2
+aiohttp==3.9.3
+requests==2.31.0
+>>>>>>> e4c6eef9b1d2dc8770a931cde26a57942720f085
 
 # Utilities
 python-multipart==0.0.9
