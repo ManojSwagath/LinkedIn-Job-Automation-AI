@@ -28,12 +28,10 @@ google-generativeai==0.8.3
 openai==1.57.4
 
 # Vector Store
-<<<<<<< HEAD
 faiss-cpu==1.9.0.post1
-=======
-faiss-cpu==1.7.4
 
->>>>>>> d3692bdee47451913db9061cfed779c1ee52209b
+
+
 chromadb==0.5.23
 
 
