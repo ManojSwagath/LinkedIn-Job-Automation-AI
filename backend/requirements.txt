@@ -42,11 +42,11 @@ beautifulsoup4==4.12.3
 lxml==5.3.0
 
 # API & HTTP
-<<<<<<< HEAD
+
 httpx==0.28.1
 aiohttp==3.11.11
 requests==2.32.3
-=======
+
 
 aiohttp==3.11.11
 requests==2.32.3
@@ -54,7 +54,7 @@ httpx==0.25.2
 aiohttp==3.9.3
 requests==2.31.0
 
->>>>>>> d3692bdee47451913db9061cfed779c1ee52209b
+
 
 # Utilities
 python-multipart==0.0.9
