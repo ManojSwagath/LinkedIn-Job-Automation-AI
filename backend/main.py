@@ -19,7 +19,7 @@ from contextlib import asynccontextmanager
 import uvicorn
 
 # Use relative imports for script compatibility
-from backend.config import settings
+from .config import settings
 from backend.routes.api_routes import router as api_router
 from backend.routes.linkedin_jobs_routes import router as linkedin_jobs_router
 from backend.routes.agent_routes import router as agent_router
