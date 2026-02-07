@@ -4,10 +4,16 @@ Initializes the application, middleware, and routes.
 """
 import sys
 import asyncio
+from pathlib import Path
 
 # Windows-specific: Ensure ProactorEventLoop is used for subprocess compatibility
 if sys.platform == 'win32':
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+
+# Ensure the repo root is on sys.path for absolute imports in different run contexts.
+repo_root = Path(__file__).resolve().parents[1]
+if str(repo_root) not in sys.path:
+    sys.path.insert(0, str(repo_root))
 
 from typing import Optional, Dict, Any
 from fastapi import FastAPI, Request
