@@ -10,10 +10,13 @@ from pathlib import Path
 if sys.platform == 'win32':
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
-# Ensure the repo root is on sys.path for absolute imports in different run contexts.
+# Ensure repo root AND backend dir are on sys.path for all run contexts.
 repo_root = Path(__file__).resolve().parents[1]
+backend_dir = Path(__file__).resolve().parent
 if str(repo_root) not in sys.path:
     sys.path.insert(0, str(repo_root))
+if str(backend_dir) not in sys.path:
+    sys.path.insert(0, str(backend_dir))
 
 from typing import Optional, Dict, Any
 from fastapi import FastAPI, Request
@@ -33,6 +36,7 @@ from backend.routes.ats_routes import router as ats_router
 from backend.routes.cover_letter_routes import router as cover_letter_router
 from backend.api.autoagenthire import router as autoagenthire_router
 from backend.routes.v2_routes import router as v2_router
+from backend.routes.auth_routes import router as auth_router
 from backend.database.connection import init_db
 # from backend.utils.logger import setup_logger
 
@@ -109,6 +113,7 @@ app.add_middleware(
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 # Include routers
+app.include_router(auth_router)
 app.include_router(api_router)
 app.include_router(linkedin_jobs_router)
 app.include_router(agent_router)
@@ -157,7 +162,6 @@ except Exception as e:
     print(f"⚠️  Could not load AutoAgentHire routes: {e}")
 
 # TODO: Include routers
-# app.include_router(routes.auth_router, prefix="/auth", tags=["Authentication"])
 # app.include_router(routes.jobs_router, prefix="/jobs", tags=["Jobs"])
 # app.include_router(routes.applications_router, prefix="/applications", tags=["Applications"])
 # app.include_router(routes.user_router, prefix="/users", tags=["Users"])
