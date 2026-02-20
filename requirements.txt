@@ -1,13 +1,14 @@
-# Core Framework
+﻿# Core Framework
 fastapi==0.115.0
 uvicorn[standard]==0.32.0
+gunicorn==21.2.0
 pydantic==2.9.2
 pydantic-settings==2.6.1
 python-dotenv==1.0.1
 
-# Web Automation
+# Web Automation (browser control for LinkedIn bot)
 playwright==1.48.0
-selenium==4.27.1
+greenlet>=3.0.0
 
 # Database
 sqlalchemy==2.0.36
@@ -22,9 +23,9 @@ langgraph==0.2.59
 google-generativeai==0.8.3
 openai==1.57.4
 
-# Vector Store
-chromadb==0.5.23
+# Vector Search
 faiss-cpu==1.9.0.post1
+numpy==1.26.4
 
 # Document Processing
 pypdf==5.1.0
@@ -37,7 +38,7 @@ httpx==0.28.1
 aiohttp==3.11.11
 requests==2.32.3
 
-# Utilities
+# Auth & Security
 python-multipart==0.0.9
 email-validator==2.1.0
 python-jose[cryptography]==3.3.0
@@ -46,20 +47,6 @@ bcrypt==4.0.1
 google-auth==2.29.0
 PyJWT==2.8.0
 
-# Logging & Monitoring
+# Logging
 loguru==0.7.2
 rich==13.7.0
-
-# Testing
-pytest==8.0.0
-pytest-asyncio==0.23.4
-
-# GitHub API
-PyGithub==2.2.0
-
-# Data Processing
-pandas==2.2.0
-numpy==1.26.4
-
-# CORS & Security
-python-cors==1.0.0

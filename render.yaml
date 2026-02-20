@@ -11,4 +11,20 @@ services:
         value: "3.11.11"
       - key: PLAYWRIGHT_BROWSERS_PATH
         value: "/opt/render/project/.cache/ms-playwright"
+      - key: APP_ENV
+        value: "production"
+      - key: DEBUG
+        value: "false"
+      - key: API_RELOAD
+        value: "false"
+      # Set these in the Render dashboard (do NOT commit secrets to this file):
+      # - key: DATABASE_URL           (PostgreSQL URL from Supabase)
+      # - key: SECRET_KEY             (random 32-char secret)
+      # - key: OPENAI_API_KEY
+      # - key: GEMINI_API_KEY
+      # - key: SUPABASE_URL
+      # - key: SUPABASE_KEY
+      # - key: LINKEDIN_EMAIL
+      # - key: LINKEDIN_PASSWORD
+      # - key: CORS_ORIGINS           (comma-separated, e.g. https://yourapp.vercel.app)
     autoDeploy: true
