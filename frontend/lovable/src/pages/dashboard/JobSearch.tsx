@@ -46,7 +46,7 @@ const JobSearch = () => {
     easyApply: true,
   });
 
-  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+  const API_BASE_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || 'https://linkedin-job-automation-ai.onrender.com';
 
   // Get user profile from localStorage
   const getUserProfile = () => {

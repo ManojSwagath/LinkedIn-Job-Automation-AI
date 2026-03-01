@@ -37,7 +37,7 @@ const Applications = () => {
     const fetchApplications = async () => {
       try {
         setLoading(true);
-        const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+        const API_BASE_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || 'https://linkedin-job-automation-ai.onrender.com';
         const response = await fetch(`${API_BASE_URL}/api/applications`);
         const data = await response.json();
         setApplications(data.applications || []);

@@ -56,7 +56,7 @@ const ATSChecker = () => {
       formData.append("resume", resumeFile);  // Backend expects "resume" not "resume_file"
       formData.append("job_description", jobDescription);
 
-      const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
+      const API_BASE_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || "https://linkedin-job-automation-ai.onrender.com";
       const response = await fetch(`${API_BASE_URL}/api/ats/match`, {
         method: "POST",
         body: formData,
@@ -107,7 +107,7 @@ const ATSChecker = () => {
     setIsGeneratingCoverLetter(true);
 
     try {
-      const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
+      const API_BASE_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || "https://linkedin-job-automation-ai.onrender.com";
       const response = await fetch(`${API_BASE_URL}/api/cover-letter/generate`, {
         method: "POST",
         headers: {

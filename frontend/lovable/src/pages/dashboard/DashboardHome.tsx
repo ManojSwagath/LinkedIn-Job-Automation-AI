@@ -19,7 +19,7 @@ const DashboardHome = () => {
   useEffect(() => {
     const fetchStatus = async () => {
       try {
-        const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+        const API_BASE_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || 'https://linkedin-job-automation-ai.onrender.com';
         const response = await fetch(`${API_BASE_URL}/api/agent/status`);
         const data = await response.json();
         setAgentStatus(data.detail);
@@ -222,7 +222,7 @@ const DashboardHome = () => {
                 disabled={agentStatus?.status !== "running"}
                 onClick={async () => {
                   try {
-                    const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+                    const API_BASE_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || 'https://linkedin-job-automation-ai.onrender.com';
                     await fetch(`${API_BASE_URL}/api/agent/pause`, { method: 'POST' });
                     toast({ title: "Agent paused" });
                   } catch (error) {

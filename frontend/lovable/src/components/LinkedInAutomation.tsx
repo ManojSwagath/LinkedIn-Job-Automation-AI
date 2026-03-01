@@ -214,7 +214,8 @@ export default function LinkedInAutomation() {
   const pollStatus = async (sid: string) => {
     const interval = setInterval(async () => {
       try {
-        const response = await fetch(`http://localhost:8000/api/v2/automation-status/${sid}`);
+        const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://linkedin-job-automation-ai.onrender.com';
+        const response = await fetch(`${API_BASE_URL}/api/v2/automation-status/${sid}`);
         const data = await response.json();
         
         setStatus(data);
@@ -224,7 +225,7 @@ export default function LinkedInAutomation() {
           setIsRunning(false);
 
           if (data.status === 'completed') {
-            const resultsResponse = await fetch(`http://localhost:8000/api/v2/automation-results/${sid}`);
+            const resultsResponse = await fetch(`${API_BASE_URL}/api/v2/automation-results/${sid}`);
             const resultsData = await resultsResponse.json();
             setResults(resultsData.results);
             setShowResults(true);

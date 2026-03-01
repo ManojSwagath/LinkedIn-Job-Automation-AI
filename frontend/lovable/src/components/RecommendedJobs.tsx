@@ -58,7 +58,7 @@ export default function RecommendedJobs() {
   useEffect(() => {
     const fetchRoles = async () => {
       try {
-        const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+        const API_BASE_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || 'https://linkedin-job-automation-ai.onrender.com';
         const response = await fetch(`${API_BASE_URL}/api/linkedin/available-roles`);
         const data = await response.json();
         if (data.status === "success") {
@@ -95,7 +95,7 @@ export default function RecommendedJobs() {
 
       console.log("Fetching jobs with role:", jobRole, "filtering:", enableFiltering);
 
-      const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+      const API_BASE_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || 'https://linkedin-job-automation-ai.onrender.com';
       const response = await fetch(`${API_BASE_URL}/api/linkedin/recommended-jobs`, {
         method: "POST",
         headers: {
