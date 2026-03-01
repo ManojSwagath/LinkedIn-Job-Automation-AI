@@ -146,17 +146,17 @@ class ResumeIntelligence:
     def _extract_text_from_pdf(self, file_path: Path) -> str:
         """Extract text from PDF file"""
         try:
-        with open(file_path, "rb") as file:
-            reader = PdfReader(file)
-            text = ""
-            for page in reader.pages:
-                page_text = page.extract_text()
-                if page_text:
-                    text += page_text + "\n"
+            with open(file_path, "rb") as file:
+                reader = PdfReader(file)
+                text = ""
+                for page in reader.pages:
+                    page_text = page.extract_text()
+                    if page_text:
+                        text += page_text + "\n"
             return text.strip()
-    except Exception as e:
-        logger.error(f"❌ PDF extraction failed: {e}")
-        raise
+        except Exception as e:
+            logger.error(f"❌ PDF extraction failed: {e}")
+            raise
 
     
     # def _extract_text_from_docx(self, file_path: Path) -> str:

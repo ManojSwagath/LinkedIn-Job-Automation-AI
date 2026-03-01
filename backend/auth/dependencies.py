@@ -11,7 +11,7 @@ from jose import JWTError
 
 from backend.auth.jwt import decode_access_token
 from backend.database.connection import get_db
-from backend.database.models_complete import User
+from backend.database.models import User
 from backend.database.crud import UserRepository
 
 # The tokenUrl points at the login endpoint so Swagger UI can use it.

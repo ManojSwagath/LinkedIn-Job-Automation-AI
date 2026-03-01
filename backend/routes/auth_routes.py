@@ -24,7 +24,7 @@ from backend.auth.validators import validate_email_format, validate_password_str
 from backend.auth.dependencies import get_current_user
 from backend.database.connection import get_db
 from backend.database.crud import UserRepository
-from backend.database.models_complete import User
+from backend.database.models import User
 
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
 

@@ -6,11 +6,12 @@ from typing import Optional
 from datetime import datetime, timedelta
 import sys
 import os
+import platform
 
 # Add backend directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from automation.linkedin_recommended_jobs import fetch_recommended_jobs
+from automation.linkedin_recommended_jobs import fetch_recommended_jobs, fetch_recommended_jobs_sync
 from matching.job_filter import filter_jobs, get_available_roles
 # Import production-grade filtering system
 from matching.job_filter_production import (
@@ -66,10 +67,18 @@ async def get_recommended_jobs(payload: RecommendedJobsRequest):
         print(f"   Filtering enabled: {payload.enable_filtering}")
         
         # Fetch raw jobs from LinkedIn
-        raw_jobs = await fetch_recommended_jobs(
-            email=payload.linkedin_email,
-            password=payload.linkedin_password,
-        )
+        # Use sync wrapper on Windows, async on other platforms
+        if platform.system() == "Windows":
+            print("🪟 Using Windows-compatible sync scraper")
+            raw_jobs = fetch_recommended_jobs_sync(
+                email=payload.linkedin_email,
+                password=payload.linkedin_password,
+            )
+        else:
+            raw_jobs = await fetch_recommended_jobs(
+                email=payload.linkedin_email,
+                password=payload.linkedin_password,
+            )
         
         print(f"✅ Fetched {len(raw_jobs)} raw jobs from LinkedIn")
         

@@ -10,6 +10,8 @@ import os
 import json
 from datetime import datetime
 
+from backend.utils.file_storage import file_storage
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["api"])
@@ -156,15 +158,12 @@ async def run_agent(
         raise HTTPException(400, "Agent is already running")
     
     try:
-        # Save resume file
-        upload_dir = "uploads/resumes"
-        os.makedirs(upload_dir, exist_ok=True)
-        
-        resume_path = os.path.join(upload_dir, f"{linkedin_email}_{file.filename}")
-        with open(resume_path, "wb") as f:
-            content = await file.read()
-            f.write(content)
-        
+        # Save resume file using file_storage utility
+        resume_path, resume_url = await file_storage.save_upload(
+            file=file,
+            subfolder="resumes",
+            user_id=linkedin_email
+        )
         logger.info(f"Resume saved for agent run: {resume_path}")
         
         # NEW: Parse user profile JSON

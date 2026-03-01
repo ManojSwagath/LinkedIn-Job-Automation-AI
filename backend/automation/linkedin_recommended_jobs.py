@@ -412,6 +412,43 @@ async def fetch_recommended_jobs(email: Optional[str] = None, password: Optional
     return await scraper.fetch_recommended_jobs()
 
 
+def fetch_recommended_jobs_sync(email: Optional[str] = None, password: Optional[str] = None) -> List[Dict[str, Any]]:
+    """
+    Windows-compatible synchronous wrapper for fetch_recommended_jobs.
+    Runs the async code in a separate thread with its own event loop.
+    
+    Args:
+        email: LinkedIn email
+        password: LinkedIn password
+        
+    Returns:
+        List of job dictionaries
+    """
+    import platform
+    import concurrent.futures
+    import threading
+    
+    def run_in_thread():
+        """Run async code in a separate thread with its own event loop"""
+        # Create a new event loop for this thread
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            return loop.run_until_complete(fetch_recommended_jobs(email, password))
+        finally:
+            loop.close()
+    
+    # On Windows with Python 3.13, asyncio.create_subprocess_exec doesn't work
+    # Run in a thread pool to avoid the NotImplementedError
+    if platform.system() == "Windows":
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(run_in_thread)
+            return future.result(timeout=180)  # 3 minute timeout
+    else:
+        # On other platforms, just run normally
+        return asyncio.run(fetch_recommended_jobs(email, password))
+
+
 # Test function
 async def main():
     """Test the scraper"""

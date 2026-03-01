@@ -74,12 +74,28 @@ vector_db/data/*
 chroma_db/
 *.chroma
 
-# Uploaded Files
+# Uploaded Files & User Data
 data/resumes/*
 data/job_listings/*
+data/cover_letters/*
+data/screenshots/*
+data/reports/*
 uploads/
+uploads/**/*
 !data/resumes/.gitkeep
 !data/job_listings/.gitkeep
+!data/cover_letters/.gitkeep
+!data/screenshots/.gitkeep
+!uploads/resumes/.gitkeep
+
+# Document Files (PDFs, Word docs, etc.)
+*.pdf
+*.doc
+*.docx
+*.odt
+*.rtf
+!docs/**/*.pdf
+!documentation/**/*.pdf
 
 # Secrets & Credentials
 credentials.json

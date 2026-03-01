@@ -1,11 +1,12 @@
-import { useState } from "react";
-import { Link, Outlet, useLocation } from "react-router-dom";
+import { useState, useEffect } from "react";
+import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Bot, LayoutDashboard, FileText, Search, Briefcase, Settings, HelpCircle,
   LogOut, Menu, X, Bell, ChevronDown, User, Star, Play
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { apiClient, API_ENDPOINTS } from "@/lib/api";
 
 const sidebarLinks = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
@@ -21,7 +22,31 @@ const sidebarLinks = [
 export const DashboardLayout = () => {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [userName, setUserName] = useState<string>("User");
   const location = useLocation();
+  const navigate = useNavigate();
+
+  // Fetch user profile on mount
+  useEffect(() => {
+    const fetchUserProfile = async () => {
+      try {
+        const response = await apiClient.get(API_ENDPOINTS.auth.me);
+        if (response.data?.full_name) {
+          setUserName(response.data.full_name);
+        } else if (response.data?.email) {
+          setUserName(response.data.email.split('@')[0]);
+        }
+      } catch (error) {
+        console.error("Failed to fetch user profile:", error);
+      }
+    };
+    fetchUserProfile();
+  }, []);
+
+  const handleLogout = () => {
+    localStorage.removeItem("authToken");
+    navigate("/");
+  };
 
   return (
     <div className="min-h-screen bg-background flex">
@@ -70,13 +95,13 @@ export const DashboardLayout = () => {
 
         {/* Logout */}
         <div className="p-4 border-t border-white/5">
-          <Link
-            to="/"
-            className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-muted-foreground hover:bg-white/5 hover:text-foreground transition-all"
+          <button
+            onClick={handleLogout}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-muted-foreground hover:bg-white/5 hover:text-foreground transition-all"
           >
             <LogOut className="w-5 h-5 flex-shrink-0" />
             {sidebarOpen && <span className="font-medium">Logout</span>}
-          </Link>
+          </button>
         </div>
       </aside>
 
@@ -157,9 +182,9 @@ export const DashboardLayout = () => {
 
             <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl hover:bg-white/5 cursor-pointer transition-colors">
               <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary to-blue-400 flex items-center justify-center text-primary-foreground text-sm font-medium">
-                JD
+                {userName.charAt(0).toUpperCase()}
               </div>
-              <span className="hidden sm:block text-sm font-medium">John Doe</span>
+              <span className="hidden sm:block text-sm font-medium">{userName}</span>
               <ChevronDown className="w-4 h-4 text-muted-foreground" />
             </div>
           </div>

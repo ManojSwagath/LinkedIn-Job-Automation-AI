@@ -13,6 +13,7 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 
 from backend.agents.autoagenthire_bot import AutoAgentHireBot
+from backend.utils.file_storage import file_storage
 
 router = APIRouter(prefix="/api/v2", tags=["V2 Automation"])
 
@@ -64,13 +65,13 @@ async def start_automation_v2(
     
     resume_path = None
     if resume:
-        uploads_dir = Path("uploads")
-        uploads_dir.mkdir(parents=True, exist_ok=True)
-        resume_path = uploads_dir / f"{session_id}_{resume.filename}"
-        with open(resume_path, "wb") as f:
-            content = await resume.read()
-            f.write(content)
-        resume_path = str(resume_path)
+        # Use file_storage utility for cloud or local storage
+        resume_path, resume_url = await file_storage.save_upload(
+            file=resume,
+            subfolder="resumes",
+            user_id=session_id
+        )
+        print(f"[AUTOMATION V2] Resume saved: {resume_path}")
     
     user_profile = {
         "first_name": first_name,
@@ -180,6 +181,8 @@ async def run_playwright_subprocess(session_id: str, config: dict):
                 stderr=subprocess.STDOUT,
                 cwd=str(Path(__file__).parent.parent.parent),
                 text=True,
+                encoding='utf-8',
+                errors='replace',
                 bufsize=1
             )
             

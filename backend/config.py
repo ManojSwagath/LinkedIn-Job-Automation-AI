@@ -31,6 +31,11 @@ class Settings(BaseSettings):
     DATABASE_URL: str
     SYNC_DATABASE_URL: Optional[str] = None
     
+    # Supabase
+    SUPABASE_URL: Optional[str] = None
+    SUPABASE_KEY: Optional[str] = None
+    SUPABASE_BUCKET_NAME: str = "resumes"
+    
     # Redis
     REDIS_URL: str = "redis://localhost:6379/0"
     
@@ -125,6 +130,13 @@ class Settings(BaseSettings):
     # File Upload
     MAX_UPLOAD_SIZE_MB: int = 10
     ALLOWED_RESUME_EXTENSIONS: str = "pdf,docx,txt"
+    FILE_STORAGE_TYPE: str = "local"  # local, supabase, s3
+    
+    # AWS S3 (optional)
+    AWS_S3_BUCKET_NAME: Optional[str] = None
+    AWS_ACCESS_KEY_ID: Optional[str] = None
+    AWS_SECRET_ACCESS_KEY: Optional[str] = None
+    AWS_REGION: str = "us-east-1"
     
     @property
     def allowed_extensions_list(self) -> List[str]:
@@ -170,7 +182,7 @@ except Exception as e:
         API_PORT=int(os.environ.get("API_PORT", 8000)),
         API_RELOAD=False,
         SECRET_KEY=os.environ.get("SECRET_KEY", "dev-secret"),
-        DATABASE_URL=os.environ.get("DATABASE_URL", "sqlite+aiosqlite:///./autoagenthire.db"),
+        DATABASE_URL=os.environ.get("DATABASE_URL", "sqlite:///./data/autoagenthire.db"),
         OPENAI_API_KEY=os.environ.get("OPENAI_API_KEY", "test-key"),
         CORS_ORIGINS=os.environ.get("CORS_ORIGINS", "http://localhost:3000,http://localhost:8501"),
         ALLOWED_RESUME_EXTENSIONS=os.environ.get("ALLOWED_RESUME_EXTENSIONS", "pdf,docx,txt"),

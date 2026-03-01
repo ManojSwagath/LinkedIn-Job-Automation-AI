@@ -1,0 +1,1524 @@
+================================================================================
+          LINKEDIN JOB AUTOMATION WITH AI - SYSTEM ARCHITECTURE
+================================================================================
+
+PROJECT OVERVIEW
+================================================================================
+An autonomous AI agent system that discovers and applies to LinkedIn jobs 
+automatically on behalf of users. The system combines web automation, 
+artificial intelligence, and modern web technologies to streamline the 
+job application process.
+
+AUTHOR: AutoAgentHire Team
+DATE: February 26, 2026
+VERSION: 1.0.0
+
+
+================================================================================
+                        HIGH-LEVEL ARCHITECTURE
+================================================================================
+
+DEPLOYMENT MODEL: Microservices (Separated Frontend & Backend)
+PRIMARY GOAL: Automate LinkedIn job search and application process using AI
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│                                                                         │
+│                          USER INTERFACE LAYER                          │
+│                                                                         │
+│  ┌────────────────────────────┐    ┌───────────────────────────────┐  │
+│  │   React + Vite Frontend    │    │   Streamlit Dashboard         │  │
+│  │   (TypeScript, Shadcn UI)  │    │   (Alternative Interface)     │  │
+│  │   Deployed on: VERCEL      │    │   Deployed on: RENDER         │  │
+│  │   Port: 80/443 (HTTPS)     │    │   Port: 8501                  │  │
+│  └──────────┬─────────────────┘    └───────────────────────────────┘  │
+│             │                                                           │
+└─────────────┼───────────────────────────────────────────────────────────┘
+              │
+              │ HTTPS/REST API CALLS
+              │
+┌─────────────▼───────────────────────────────────────────────────────────┐
+│                                                                         │
+│                        API GATEWAY LAYER                               │
+│                                                                         │
+│  ┌─────────────────────────────────────────────────────────────────┐  │
+│  │                    FastAPI Backend                               │  │
+│  │                    Deployed on: RENDER                           │  │
+│  │                    Port: 8000 (Production uses $PORT)            │  │
+│  │                                                                   │  │
+│  │  Entry Point: backend/main.py                                    │  │
+│  │  - CORS Middleware (Cross-Origin Resource Sharing)               │  │
+│  │  - GZip Compression                                              │  │
+│  │  - JWT Authentication                                            │  │
+│  │  - Request Validation (Pydantic)                                 │  │
+│  │  - Error Handling                                                │  │
+│  └─────────────────────────────────────────────────────────────────┘  │
+│                                                                         │
+└─────────────┬───────────────────────────────────────────────────────────┘
+              │
+              │ INTERNAL SERVICE CALLS
+              │
+┌─────────────▼───────────────────────────────────────────────────────────┐
+│                                                                         │
+│                     BUSINESS LOGIC LAYER                               │
+│                                                                         │
+│  ┌────────────────┐  ┌────────────────┐  ┌─────────────────────────┐  │
+│  │  Auth Service  │  │  Agent Service  │  │  Automation Service    │  │
+│  │  - JWT Tokens  │  │  - LangGraph   │  │  - Playwright Browser  │  │
+│  │  - User Mgmt   │  │  - Multi-Agent │  │  - LinkedIn Bot        │  │
+│  └────────────────┘  └────────────────┘  └─────────────────────────┘  │
+│                                                                         │
+│  ┌────────────────┐  ┌────────────────┐  ┌─────────────────────────┐  │
+│  │  LLM Service   │  │  Matching Svc  │  │  RAG Service           │  │
+│  │  - Gemini AI   │  │  - Job Filter  │  │  - Resume Intelligence │  │
+│  │  - OpenAI GPT  │  │  - Profile     │  │  - Vector Search       │  │
+│  │  - Cover Letter│  │    Matcher     │  │   (FAISS)              │  │
+│  └────────────────┘  └────────────────┘  └─────────────────────────┘  │
+│                                                                         │
+└─────────────┬───────────────────────────────────────────────────────────┘
+              │
+              │ DATABASE CALLS
+              │
+┌─────────────▼───────────────────────────────────────────────────────────┐
+│                                                                         │
+│                        DATA LAYER                                      │
+│                                                                         │
+│  ┌──────────────────────────────────────────────────────────────────┐  │
+│  │  PostgreSQL Database (Supabase Cloud)                            │  │
+│  │                                                                   │  │
+│  │  Tables:                                                          │  │
+│  │  - users (authentication, profile)                               │  │
+│  │  - resumes (uploaded files, parsed data)                         │  │
+│  │  - job_listings (scraped jobs)                                   │  │
+│  │  - applications (submission tracking)                            │  │
+│  │  - job_matches (AI matching results)                             │  │
+│  │  - credentials (LinkedIn login info)                             │  │
+│  └──────────────────────────────────────────────────────────────────┘  │
+│                                                                         │
+│  ┌──────────────────────────────────────────────────────────────────┐  │
+│  │  Vector Store (FAISS - In-Memory)                                │  │
+│  │  - Resume embeddings                                              │  │
+│  │  - Job description embeddings                                     │  │
+│  │  - Semantic similarity search                                     │  │
+│  └──────────────────────────────────────────────────────────────────┘  │
+│                                                                         │
+│  ┌──────────────────────────────────────────────────────────────────┐  │
+│  │  File Storage                                                     │  │
+│  │  - Resume uploads (PDF, DOCX)                                     │  │
+│  │  - Cover letter templates                                         │  │
+│  │  - Application logs (JSON)                                        │  │
+│  └──────────────────────────────────────────────────────────────────┘  │
+│                                                                         │
+└───────────────────────────────────────────────────────────────────────────┘
+
+
+================================================================================
+                        DETAILED COMPONENT BREAKDOWN
+================================================================================
+
+1. FRONTEND LAYER
+================================================================================
+
+1.1 React + Vite Frontend (Primary UI)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Location: frontend/lovable/
+Technology Stack:
+  - React 18+ (Component framework)
+  - TypeScript (Type safety)
+  - Vite (Build tool & dev server)
+  - TailwindCSS (Styling)
+  - Shadcn UI (Component library based on Radix UI)
+  - React Query (@tanstack/react-query) (Server state management)
+  - React Hook Form + Zod (Form handling & validation)
+  - Axios (HTTP client)
+  - Framer Motion (Animations)
+
+Key Features:
+  - User authentication (Login/Signup)
+  - Resume upload interface
+  - Job preference configuration
+  - Automation dashboard
+  - Real-time progress tracking
+  - Application history
+  - Cover letter generation UI
+
+Build Configuration:
+  - Entry: frontend/lovable/src/main.tsx
+  - Build Output: frontend/lovable/dist
+  - Base Config: vite.config.ts
+  - Environment Variables:
+    * VITE_API_URL: Backend API endpoint
+    * VITE_GOOGLE_CLIENT_ID: OAuth client ID
+
+Deployment:
+  - Platform: Vercel
+  - Build Command: npm install && npm run build
+  - Output Directory: frontend/lovable/dist
+  - Framework: React (SPA mode)
+  - Domain: Custom domain or *.vercel.app
+
+
+1.2 Streamlit Dashboard (Alternative UI)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Location: frontend/streamlit/
+Technology: Streamlit (Python web framework)
+Port: 8501
+Purpose: Alternative admin/monitoring interface
+Features:
+  - Simple Python-based UI
+  - Quick prototyping interface
+  - Data visualization
+  - Admin controls
+
+
+2. BACKEND API LAYER
+================================================================================
+
+2.1 FastAPI Application
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Location: backend/main.py
+Framework: FastAPI (Python async web framework)
+ASGI Server: Uvicorn + Gunicorn (Production)
+
+Port Configuration:
+  - Development: 8000
+  - Production: Dynamic ($PORT from Render)
+
+Middleware Stack:
+  1. CORS Middleware
+     - Allows: Vercel frontend domain
+     - Credentials: Enabled
+     - Methods: All
+     - Headers: All
+  
+  2. GZip Compression
+     - Minimum Size: 1000 bytes
+     - Reduces response size
+  
+  3. Custom Exception Handlers
+     - Validation errors (422)
+     - Authentication errors (401)
+     - Authorization errors (403)
+
+Lifecycle Events:
+  - Startup:
+    * Database initialization
+    * Vector store warming
+    * Background task scheduler
+  - Shutdown:
+    * Database connection cleanup
+    * Task cancellation
+
+
+2.2 API Route Modules
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Location: backend/routes/
+
+Route Files and Endpoints:
+
+┌─────────────────────────────────────────────────────────────────────┐
+│ auth_routes.py - Authentication & User Management                  │
+├─────────────────────────────────────────────────────────────────────┤
+│ POST   /auth/signup          - User registration                   │
+│ POST   /auth/login           - User login (returns JWT)            │
+│ POST   /auth/refresh         - Refresh access token                │
+│ GET    /auth/me              - Get current user profile            │
+│ PUT    /auth/profile         - Update user profile                 │
+│ POST   /auth/change-password - Change user password                │
+└─────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────┐
+│ api_routes.py - Core API Endpoints                                 │
+├─────────────────────────────────────────────────────────────────────┤
+│ POST   /api/resume/upload    - Upload resume file                  │
+│ GET    /api/resume/{id}      - Get parsed resume data              │
+│ POST   /api/run-agent        - Start automation agent              │
+│ GET    /api/agent/status/{id}- Check agent execution status        │
+└─────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────┐
+│ v2_routes.py - Frontend-Compatible V2 API                          │
+├─────────────────────────────────────────────────────────────────────┤
+│ POST   /api/v2/start-automation     - Start job automation         │
+│ GET    /api/v2/automation-status/{id} - Poll progress              │
+│ GET    /api/v2/automation-results/{id} - Get final results         │
+└─────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────┐
+│ linkedin_jobs_routes.py - Job Search & Discovery                   │
+├─────────────────────────────────────────────────────────────────────┤
+│ POST   /api/jobs/search      - Search LinkedIn jobs                │
+│ GET    /api/jobs/{id}        - Get job details                     │
+│ GET    /api/jobs/recommended - Get recommended jobs                │
+└─────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────┐
+│ agent_routes.py - Multi-Agent Orchestration                        │
+├─────────────────────────────────────────────────────────────────────┤
+│ POST   /agents/run           - Execute agent workflow              │
+│ GET    /agents/status        - Get all agent statuses              │
+│ POST   /agents/cancel/{id}   - Cancel running agent                │
+└─────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────┐
+│ cover_letter_routes.py - Cover Letter Generation                   │
+├─────────────────────────────────────────────────────────────────────┤
+│ POST   /api/cover-letter/generate - Generate cover letter          │
+│ GET    /api/cover-letter/{id}     - Get saved cover letter         │
+│ PUT    /api/cover-letter/{id}     - Update cover letter            │
+└─────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────┐
+│ ats_routes.py - ATS Optimization                                   │
+├─────────────────────────────────────────────────────────────────────┤
+│ POST   /api/ats/analyze      - Analyze resume ATS compatibility    │
+│ POST   /api/ats/optimize     - Get ATS optimization suggestions    │
+└─────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────┐
+│ autoagenthire_routes.py - AutoAgentHire Bot Integration            │
+├─────────────────────────────────────────────────────────────────────┤
+│ POST   /autoagenthire/start  - Start AutoAgentHire bot             │
+│ GET    /autoagenthire/status - Get bot status                      │
+└─────────────────────────────────────────────────────────────────────┘
+
+
+3. BUSINESS LOGIC LAYER
+================================================================================
+
+3.1 Authentication Service
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Location: backend/auth/
+
+Components:
+  - jwt.py: JWT token creation and validation
+    * Algorithm: HS256
+    * Access Token Expiry: 30 minutes
+    * Refresh Token Expiry: 7 days
+  
+  - password.py: Password hashing and verification
+    * Hashing: bcrypt
+    * Salting: Automatic
+    * Validation: Passlib
+  
+  - dependencies.py: FastAPI dependency injectors
+    * get_current_user(): JWT validation
+    * get_current_active_user(): Active user check
+  
+  - validators.py: Input validation
+    * Email format validation
+    * Password strength rules
+    * Phone number formatting
+
+
+3.2 Agent System (Multi-Agent Architecture)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Location: backend/agents/
+
+Primary Framework: LangGraph (State machine for agent workflows)
+
+Agent Architecture:
+┌──────────────────────────────────────────────────────────────────────┐
+│                    LANGGRAPH ORCHESTRATOR                            │
+│                  (langgraph_orchestrator.py)                         │
+│                                                                      │
+│  State Machine Flow:                                                │
+│                                                                      │
+│  START                                                               │
+│    │                                                                 │
+│    ▼                                                                 │
+│  ┌────────────────────────────────────────┐                         │
+│  │  Node 1: RESUME PARSING                │                         │
+│  │  - Extract skills                      │                         │
+│  │  - Parse experience                    │                         │
+│  │  - Identify education                  │                         │
+│  │  - Generate embeddings                 │                         │
+│  └──────────────┬─────────────────────────┘                         │
+│                 │                                                    │
+│                 ▼                                                    │
+│  ┌────────────────────────────────────────┐                         │
+│  │  Node 2: JOB SEARCH                    │                         │
+│  │  - LinkedIn search                     │                         │
+│  │  - Filter by keywords                  │                         │
+│  │  - Location filtering                  │                         │
+│  │  - Scrape job details                  │                         │
+│  └──────────────┬─────────────────────────┘                         │
+│                 │                                                    │
+│                 ▼                                                    │
+│  ┌────────────────────────────────────────┐                         │
+│  │  Node 3: JOB MATCHING                  │                         │
+│  │  - Calculate match scores              │                         │
+│  │  - Rank by relevance                   │                         │
+│  │  - Filter minimum threshold            │                         │
+│  │  - Sort top candidates                 │                         │
+│  └──────────────┬─────────────────────────┘                         │
+│                 │                                                    │
+│                 ▼                                                    │
+│  ┌────────────────────────────────────────┐                         │
+│  │  Node 4: APPLICATION                   │                         │
+│  │  - Generate cover letters              │                         │
+│  │  - Fill application forms              │                         │
+│  │  - Submit applications                 │                         │
+│  │  - Track results                       │                         │
+│  └──────────────┬─────────────────────────┘                         │
+│                 │                                                    │
+│                 ▼                                                    │
+│               END                                                    │
+│                                                                      │
+│  State Schema (graph_state.py):                                     │
+│  - user_id: User identifier                                         │
+│  - resume_data: Parsed resume content                               │
+│  - job_listings: Found jobs                                         │
+│  - matched_jobs: Ranked results                                     │
+│  - applications: Submission results                                 │
+│  - workflow_status: Current state                                   │
+│  - error_log: Error tracking                                        │
+└──────────────────────────────────────────────────────────────────────┘
+
+Individual Agents:
+
+1. linkedin_bot.py
+   - Basic LinkedIn automation
+   - Login/authentication
+   - Job search navigation
+   - Easy Apply detection
+
+2. enhanced_linkedin_bot.py
+   - Advanced anti-detection
+   - Human-like behavior simulation
+   - Random delays and movements
+   - Session management
+
+3. ultimate_linkedin_bot.py
+   - Complete automation pipeline
+   - Error recovery
+   - Multi-step form handling
+   - Application tracking
+
+4. autoagenthire_bot.py
+   - Main production bot
+   - Combines all features
+   - Full workflow automation
+   - Result reporting
+
+5. job_search_agent.py
+   - Job discovery specialist
+   - Search optimization
+   - Result scraping
+   - Data extraction
+
+6. analysis_agent.py
+   - Job analysis
+   - Requirement parsing
+   - Skill matching
+   - Fit scoring
+
+7. application_agent.py
+   - Application submission
+   - Form filling
+   - Document upload
+   - Confirmation tracking
+
+
+3.3 Automation Service
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Location: backend/automation/
+
+Components:
+
+1. linkedin_auto_apply.py (Core Automation Engine)
+   - Browser Control: Playwright (headless Chromium)
+   - Anti-Detection Features:
+     * User agent rotation
+     * Random timing delays
+     * Mouse movement simulation
+     * Typing speed variation
+     * Viewport randomization
+   
+   - Job Discovery:
+     * LinkedIn search
+     * "Easy Apply" filtering
+     * Job scraping
+     * Duplicate detection
+   
+   - Application Workflow:
+     * Login automation
+     * Multi-step form handling
+     * Resume upload
+     * Cover letter attachment
+     * Custom question answering (AI-powered)
+     * Application submission
+     * Screenshot capture (proof)
+
+2. intelligent_form_filler.py
+   - Field detection and classification
+   - Auto-fill from user profile
+   - Smart field mapping
+   - Dropdown/checkbox handling
+   - Multi-select fields
+   - Custom question AI answering
+
+3. application_handler.py
+   - Application state management
+   - Result tracking
+   - Error handling
+   - Retry logic
+   - Success/failure logging
+
+
+3.4 LLM Service
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Location: backend/llm/
+
+Components:
+
+1. gemini_service.py
+   - Provider: Google Gemini AI
+   - Model: gemini-pro
+   - Use Cases:
+     * Cover letter generation
+     * Custom question answering
+     * Job description analysis
+     * Resume optimization suggestions
+
+2. openai_client.py
+   - Provider: OpenAI
+   - Models:
+     * gpt-4-turbo-preview (text generation)
+     * text-embedding-3-small (embeddings)
+   - Use Cases:
+     * Alternative to Gemini
+     * Embeddings for RAG
+     * Advanced reasoning tasks
+
+3. cover_letter_generator.py
+   - Template-based generation
+   - Personalization engine
+   - Job-specific customization
+   - Company research integration
+   - Tone adaptation
+
+4. multi_ai_service.py
+   - Abstraction layer
+   - Fallback mechanisms
+   - Load balancing
+   - Cost optimization
+
+
+3.5 Matching Service
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Location: backend/matching/
+
+Components:
+
+1. profile_matcher.py
+   - Resume-Job matching algorithm
+   - Scoring formula:
+     * Skills match (40%)
+     * Experience match (30%)
+     * Education match (15%)
+     * Location match (10%)
+     * Keyword match (5%)
+   - Threshold: Configurable (default 65%)
+
+2. job_filter.py
+   - Filter criteria application
+   - Eliminating disqualified jobs
+   - Preference matching
+   - Blacklist checking
+
+3. job_filter_production.py
+   - Production-ready filter
+   - Performance optimized
+   - Caching enabled
+   - Batch processing
+
+
+3.6 RAG Service (Retrieval Augmented Generation)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Location: backend/rag/
+
+Components:
+
+1. resume_intelligence.py
+   - Resume semantic search
+   - Context retrieval
+   - Relevant experience extraction
+   - Skill evidence gathering
+   - Answer generation context
+
+2. vector_store.py
+   - FAISS vector database
+   - Embedding storage
+   - Similarity search
+   - Index management
+   - Persistence handling
+
+RAG Workflow:
+  1. Resume Ingestion
+     ↓
+  2. Text Chunking (500 words)
+     ↓
+  3. Embedding Generation (OpenAI)
+     ↓
+  4. Vector Storage (FAISS)
+     ↓
+  5. Query Processing
+     ↓
+  6. Similarity Search
+     ↓
+  7. Context Retrieval
+     ↓
+  8. LLM Answer Generation
+
+
+4. DATA LAYER
+================================================================================
+
+4.1 PostgreSQL Database (Supabase)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Location: backend/database/models.py
+ORM: SQLAlchemy (Async)
+
+Database Schema:
+
+┌─────────────────────────────────────────────────────────────────────┐
+│ TABLE: users                                                        │
+├─────────────────────────────────────────────────────────────────────┤
+│ id                 INTEGER         PRIMARY KEY                      │
+│ email              VARCHAR(255)    UNIQUE, NOT NULL                 │
+│ password_hash      VARCHAR(255)    NOT NULL                         │
+│ full_name          VARCHAR(255)                                     │
+│ phone              VARCHAR(50)                                      │
+│ location           VARCHAR(255)                                     │
+│ linkedin_url       VARCHAR(500)                                     │
+│ portfolio_url      VARCHAR(500)                                     │
+│ preferences        JSON                                             │
+│ created_at         TIMESTAMP       DEFAULT NOW()                    │
+│ updated_at         TIMESTAMP       DEFAULT NOW()                    │
+│ is_active          BOOLEAN         DEFAULT TRUE                     │
+└─────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────┐
+│ TABLE: resumes                                                      │
+├─────────────────────────────────────────────────────────────────────┤
+│ id                 INTEGER         PRIMARY KEY                      │
+│ user_id            INTEGER         FOREIGN KEY → users(id)          │
+│ file_path          VARCHAR(500)    NOT NULL                         │
+│ file_type          VARCHAR(50)     (pdf, docx, txt)                 │
+│ parsed_data        JSON            Parsed resume content            │
+│ skills             JSON            Extracted skills                 │
+│ experience         JSON            Work history                     │
+│ education          JSON            Education details                │
+│ created_at         TIMESTAMP       DEFAULT NOW()                    │
+│ is_active          BOOLEAN         DEFAULT TRUE                     │
+└─────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────┐
+│ TABLE: job_listings                                                 │
+├─────────────────────────────────────────────────────────────────────┤
+│ id                 INTEGER         PRIMARY KEY                      │
+│ title              VARCHAR(255)    NOT NULL                         │
+│ company            VARCHAR(255)    NOT NULL                         │
+│ location           VARCHAR(255)                                     │
+│ description        TEXT                                             │
+│ requirements       TEXT                                             │
+│ salary_min         INTEGER                                          │
+│ salary_max         INTEGER                                          │
+│ job_type           VARCHAR(50)     (Full-time, Part-time, etc.)    │
+│ experience_level   VARCHAR(50)     (Entry, Mid, Senior)             │
+│ url                VARCHAR(500)    UNIQUE (LinkedIn job URL)        │
+│ source             VARCHAR(100)    DEFAULT 'LinkedIn'               │
+│ scraped_at         TIMESTAMP       DEFAULT NOW()                    │
+│ posted_date        TIMESTAMP                                        │
+│ is_active          BOOLEAN         DEFAULT TRUE                     │
+└─────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────┐
+│ TABLE: applications                                                 │
+├─────────────────────────────────────────────────────────────────────┤
+│ id                 INTEGER         PRIMARY KEY                      │
+│ user_id            INTEGER         FOREIGN KEY → users(id)          │
+│ job_id             INTEGER         FOREIGN KEY → job_listings(id)   │
+│ status             VARCHAR(50)     (pending, submitted, rejected)   │
+│ applied_at         TIMESTAMP       DEFAULT NOW()                    │
+│ cover_letter       TEXT                                             │
+│ custom_resume      VARCHAR(500)    Path to tailored resume          │
+│ response_data      JSON            Application form responses       │
+│ result_status      VARCHAR(50)     (success, failed, skipped)       │
+│ error_message      TEXT                                             │
+│ notes              TEXT                                             │
+└─────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────┐
+│ TABLE: job_matches                                                  │
+├─────────────────────────────────────────────────────────────────────┤
+│ id                 INTEGER         PRIMARY KEY                      │
+│ user_id            INTEGER         FOREIGN KEY → users(id)          │
+│ job_id             INTEGER         FOREIGN KEY → job_listings(id)   │
+│ match_score        FLOAT           0.0 - 100.0                      │
+│ matched_skills     JSON            Array of matching skills         │
+│ missing_skills     JSON            Array of gaps                    │
+│ recommendation     TEXT            AI recommendation                │
+│ created_at         TIMESTAMP       DEFAULT NOW()                    │
+└─────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────┐
+│ TABLE: credentials                                                  │
+├─────────────────────────────────────────────────────────────────────┤
+│ id                 INTEGER         PRIMARY KEY                      │
+│ user_id            INTEGER         FOREIGN KEY → users(id)          │
+│ platform           VARCHAR(50)     DEFAULT 'LinkedIn'               │
+│ email              VARCHAR(255)    Encrypted                        │
+│ password_encrypted TEXT            Encrypted credential             │
+│ created_at         TIMESTAMP       DEFAULT NOW()                    │
+│ last_used          TIMESTAMP                                        │
+└─────────────────────────────────────────────────────────────────────┘
+
+
+4.2 Vector Database
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Technology: FAISS (Facebook AI Similarity Search)
+Storage: In-memory with disk persistence
+Dimension: 1536 (OpenAI text-embedding-3-small)
+
+Collections:
+  - resume_embeddings: User resume chunks
+  - job_embeddings: Job description chunks
+  - skill_embeddings: Skill vectors
+
+
+4.3 File Storage
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Location: data/
+Structure:
+  data/
+    ├── uploads/          (User uploaded resumes)
+    ├── applications.json (Application history)
+    ├── job_listings/     (Scraped job data)
+    ├── templates/        (Cover letter templates)
+    └── logs/             (Application logs)
+
+
+================================================================================
+                        WORKFLOW & DATA FLOW
+================================================================================
+
+USER JOURNEY - Complete Application Flow
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Step 1: USER REGISTRATION & AUTHENTICATION
+┌─────────────────────────────────────────────────────────────────────┐
+│ User Action: Sign up / Log in                                      │
+│                                                                     │
+│ Frontend (React):                                                   │
+│   → User fills registration form                                   │
+│   → Sends POST /auth/signup                                        │
+│   → Receives JWT token                                             │
+│   → Stores token in localStorage                                   │
+│                                                                     │
+│ Backend (FastAPI):                                                  │
+│   → Validates email format                                         │
+│   → Checks email uniqueness                                        │
+│   → Hashes password (bcrypt)                                       │
+│   → Creates user record in PostgreSQL                              │
+│   → Generates JWT token (HS256)                                    │
+│   → Returns token + user data                                      │
+└─────────────────────────────────────────────────────────────────────┘
+
+Step 2: RESUME UPLOAD & PARSING
+┌─────────────────────────────────────────────────────────────────────┐
+│ User Action: Upload resume (PDF/DOCX)                              │
+│                                                                     │
+│ Frontend:                                                           │
+│   → File selector component                                        │
+│   → Validates file type and size                                   │
+│   → Sends multipart/form-data to POST /api/resume/upload           │
+│                                                                     │
+│ Backend:                                                            │
+│   → Saves file to data/uploads/                                    │
+│   → Calls resume parser (pypdf/python-docx)                        │
+│   → Extracts:                                                       │
+│     * Personal info (name, email, phone)                           │
+│     * Skills (regex + NLP extraction)                              │
+│     * Experience (date ranges, companies, roles)                   │
+│     * Education (degrees, schools, dates)                          │
+│   → Generates embeddings (OpenAI API)                              │
+│   → Stores vectors in FAISS                                        │
+│   → Saves parsed_data JSON in resumes table                        │
+│   → Returns structured resume data                                 │
+└─────────────────────────────────────────────────────────────────────┘
+
+Step 3: CONFIGURE JOB PREFERENCES
+┌─────────────────────────────────────────────────────────────────────┐
+│ User Action: Set job search criteria                               │
+│                                                                     │
+│ Frontend Form Fields:                                               │
+│   - Job Keywords (e.g., "Software Engineer")                       │
+│   - Location (e.g., "Remote", "San Francisco")                     │
+│   - Experience Level (Entry, Mid, Senior)                          │
+│   - Job Type (Full-time, Part-time, Contract)                      │
+│   - Salary Range (Min, Max)                                        │
+│   - Max Applications Per Day (Rate limiting)                       │
+│   - Dry Run Mode (Test without submitting)                         │
+│                                                                     │
+│ Backend:                                                            │
+│   → Validates preferences                                          │
+│   → Stores in users.preferences (JSON column)                      │
+│   → Returns confirmation                                           │
+└─────────────────────────────────────────────────────────────────────┘
+
+Step 4: START AUTOMATION
+┌─────────────────────────────────────────────────────────────────────┐
+│ User Action: Click "Start Automation"                              │
+│                                                                     │
+│ Frontend:                                                           │
+│   → Collects all form data                                         │
+│   → Sends POST /api/v2/start-automation                            │
+│   → Receives session_id                                            │
+│   → Starts polling GET /api/v2/automation-status/{session_id}      │
+│   → Updates progress bar in real-time                              │
+│                                                                     │
+│ Backend Workflow:                                                   │
+│                                                                     │
+│   [1] Initialize Background Task                                   │
+│       → Create unique session_id                                   │
+│       → Start async task                                           │
+│       → Return session_id immediately                              │
+│                                                                     │
+│   [2] Launch Playwright Browser                                    │
+│       → Headless Chromium                                          │
+│       → Anti-detection configuration:                              │
+│         * Custom user agent                                        │
+│         * Disable automation flags                                 │
+│         * Random viewport size                                     │
+│       → Navigate to linkedin.com                                   │
+│                                                                     │
+│   [3] LinkedIn Authentication                                       │
+│       → Fill email field (with typing delay)                       │
+│       → Fill password field (with typing delay)                    │
+│       → Click sign-in button                                       │
+│       → Wait for navigation                                        │
+│       → Handle 2FA if required (manual fallback)                   │
+│       → Verify login success                                       │
+│                                                                     │
+│   [4] Job Search                                                    │
+│       → Navigate to /jobs/search                                   │
+│       → Fill keywords field                                        │
+│       → Fill location field                                        │
+│       → Apply "Easy Apply" filter                                  │
+│       → Click search                                               │
+│       → Scroll to load more results                                │
+│       → Scrape job cards:                                           │
+│         * Job ID                                                   │
+│         * Title                                                    │
+│         * Company                                                  │
+│         * Location                                                 │
+│         * Posted date                                              │
+│         * Easy Apply badge                                         │
+│       → Store in job_listings table                                │
+│       → Deduplicate by URL                                         │
+│                                                                     │
+│   [5] Job Matching (AI-Powered)                                    │
+│       → For each job:                                               │
+│         * Fetch full job description                               │
+│         * Generate job embedding                                   │
+│         * Query FAISS for resume similarity                        │
+│         * Calculate match score:                                   │
+│           - Skills overlap                                         │
+│           - Experience relevance                                   │
+│           - Education fit                                          │
+│         * Store in job_matches table                               │
+│       → Sort by match_score DESC                                   │
+│       → Filter: score >= 65%                                       │
+│       → Take top N jobs (max_applications)                         │
+│                                                                     │
+│   [6] Application Submission                                        │
+│       → For each matched job:                                       │
+│                                                                     │
+│         A. Open Job Page                                            │
+│            → Click "Easy Apply" button                             │
+│            → Wait for modal to appear                              │
+│                                                                     │
+│         B. Multi-Step Form Handling                                 │
+│            Loop through form pages:                                │
+│                                                                     │
+│            → Detect form fields:                                    │
+│              * Input type="text|email|tel"                         │
+│              * Textarea                                            │
+│              * Select dropdowns                                    │
+│              * Radio buttons                                       │
+│              * Checkboxes                                          │
+│              * File upload                                         │
+│                                                                     │
+│            → Auto-fill fields:                                      │
+│              * First Name → user_profile.first_name                │
+│              * Last Name → user_profile.last_name                  │
+│              * Email → user_profile.email                          │
+│              * Phone → user_profile.phone                          │
+│              * City → user_profile.city                            │
+│              * Resume → upload from data/uploads/                  │
+│                                                                     │
+│            → Handle Custom Questions:                               │
+│              * Identify question text                              │
+│              * Query RAG system:                                    │
+│                - Search resume for relevant context                │
+│                - Find matching experience                          │
+│              * Generate answer via LLM:                             │
+│                Prompt: "Based on this resume context: {...},       │
+│                        answer this question: {...}"                │
+│              * Fill answer field                                    │
+│                                                                     │
+│            → Click "Next" button                                    │
+│            → Wait for next page                                     │
+│                                                                     │
+│         C. Review & Submit                                          │
+│            → Final review page                                      │
+│            → Take screenshot (proof)                                │
+│            → If dry_run=false:                                      │
+│              * Click "Submit application"                          │
+│            → If dry_run=true:                                       │
+│              * Skip submit                                         │
+│              * Mark as "test_success"                              │
+│                                                                     │
+│         D. Confirm Submission                                       │
+│            → Wait for confirmation message                          │
+│            → Capture success/error message                          │
+│            → Store in applications table:                           │
+│              * status = 'submitted'                                │
+│              * applied_at = NOW()                                  │
+│              * result_status = 'success'                           │
+│                                                                     │
+│         E. Random Delay                                             │
+│            → Wait 2-5 seconds (anti-bot)                            │
+│            → Close modal                                            │
+│                                                                     │
+│   [7] Generate Report                                               │
+│       → Count total applications                                   │
+│       → Count successes / failures                                 │
+│       → List applied jobs                                           │
+│       → Calculate success rate                                     │
+│       → Store in automation_results                                │
+│                                                                     │
+│   [8] Cleanup                                                       │
+│       → Close browser                                              │
+│       → Update task status = 'completed'                           │
+│       → Send completion notification (optional)                    │
+└─────────────────────────────────────────────────────────────────────┘
+
+Step 5: VIEW RESULTS
+┌─────────────────────────────────────────────────────────────────────┐
+│ User Action: Check automation results                              │
+│                                                                     │
+│ Frontend:                                                           │
+│   → GET /api/v2/automation-results/{session_id}                    │
+│   → Display results dashboard:                                     │
+│     * Total jobs found                                             │
+│     * Jobs matched (by AI)                                         │
+│     * Applications submitted                                       │
+│     * Success rate                                                 │
+│     * List of applied jobs with status                             │
+│     * Error logs (if any)                                          │
+│                                                                     │
+│ Backend:                                                            │
+│   → Query applications table                                       │
+│   → Join with job_listings                                         │
+│   → Join with job_matches                                          │
+│   → Return aggregated results                                      │
+└─────────────────────────────────────────────────────────────────────┘
+
+
+================================================================================
+                        DEPLOYMENT ARCHITECTURE
+================================================================================
+
+PRODUCTION DEPLOYMENT STRATEGY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Multi-Cloud Deployment:
+
+┌────────────────────────────────────────────────────────────────────┐
+│                         VERCEL (Frontend)                          │
+│                      https://*.vercel.app                          │
+├────────────────────────────────────────────────────────────────────┤
+│  Build Process:                                                    │
+│    1. Detects vercel.json configuration                           │
+│    2. Runs: cd frontend/lovable && npm install && npm run build   │
+│    3. Outputs to: frontend/lovable/dist                           │
+│    4. Deploys static files to CDN                                 │
+│                                                                    │
+│  Environment Variables:                                            │
+│    - VITE_API_URL=https://your-backend.onrender.com              │
+│    - VITE_GOOGLE_CLIENT_ID=...                                    │
+│                                                                    │
+│  Features:                                                         │
+│    - Global CDN                                                    │
+│    - Automatic HTTPS                                               │
+│    - Preview deployments                                           │
+│    - Zero-config deployment                                        │
+└────────────────────────────────────────────────────────────────────┘
+
+                                 ▼ HTTPS Requests
+
+┌────────────────────────────────────────────────────────────────────┐
+│                       RENDER (Backend API)                         │
+│              https://linkedin-automation-backend.onrender.com      │
+├────────────────────────────────────────────────────────────────────┤
+│  Build Process (build.sh):                                        │
+│    1. pip install -r requirements.txt                             │
+│    2. playwright install chromium                                 │
+│    3. playwright install-deps chromium                            │
+│                                                                    │
+│  Start Command (render.yaml):                                     │
+│    gunicorn backend.main:app                                      │
+│      --workers 2                                                   │
+│      --worker-class uvicorn.workers.UvicornWorker                 │
+│      --bind 0.0.0.0:$PORT                                         │
+│      --timeout 300                                                 │
+│                                                                    │
+│  Environment Variables (Set in Render Dashboard):                 │
+│    - DATABASE_URL=postgresql://...                                │
+│    - SECRET_KEY=...                                               │
+│    - OPENAI_API_KEY=...                                           │
+│    - GEMINI_API_KEY=...                                           │
+│    - SUPABASE_URL=...                                             │
+│    - SUPABASE_KEY=...                                             │
+│    - LINKEDIN_EMAIL=...                                           │
+│    - LINKEDIN_PASSWORD=...                                        │
+│    - CORS_ORIGINS=https://yourapp.vercel.app                     │
+│    - PLAYWRIGHT_BROWSERS_PATH=/opt/render/project/.cache/ms-playwright │
+│    - PYTHON_VERSION=3.11.11                                       │
+│                                                                    │
+│  Instance Type:                                                    │
+│    - Free tier: 512 MB RAM (limited)                              │
+│    - Starter: $7/month, 512 MB RAM                                │
+│    - Standard: $25/month, 2 GB RAM (RECOMMENDED)                  │
+│                                                                    │
+│  Features:                                                         │
+│    - Auto-deploy on git push                                      │
+│    - Automatic HTTPS                                               │
+│    - Health checks                                                 │
+│    - Persistent disk                                               │
+│    - Logging & monitoring                                          │
+└────────────────────────────────────────────────────────────────────┘
+
+                                 ▼ SQL Queries
+
+┌────────────────────────────────────────────────────────────────────┐
+│                  SUPABASE (PostgreSQL Database)                    │
+│                  https://xxxx.supabase.co                          │
+├────────────────────────────────────────────────────────────────────┤
+│  Connection String:                                                │
+│    postgresql://postgres:[password]@[host]:5432/postgres          │
+│                                                                    │
+│  Features:                                                         │
+│    - Managed PostgreSQL 14+                                        │
+│    - Automatic backups                                             │
+│    - Connection pooling                                            │
+│    - Row-level security                                            │
+│    - Real-time subscriptions                                       │
+│                                                                    │
+│  Free Tier:                                                        │
+│    - 500 MB database                                               │
+│    - 1 GB bandwidth                                                │
+│    - 2 GB file storage                                             │
+│                                                                    │
+│  Pro Tier ($25/month):                                             │
+│    - 8 GB database                                                 │
+│    - 250 GB bandwidth                                              │
+│    - 100 GB file storage                                           │
+└────────────────────────────────────────────────────────────────────┘
+
+
+DEPLOYMENT FILE REFERENCE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. render.yaml
+   Purpose: Render deployment configuration
+   Location: Project root
+   Content:
+     - Service type: web
+     - Environment: python
+     - Build command: ./build.sh
+     - Start command: gunicorn ...
+     - Environment variables template
+
+2. vercel.json
+   Purpose: Vercel deployment configuration
+   Location: Project root AND frontend/lovable/
+   Content:
+     - Build command
+     - Output directory
+     - Rewrites for SPA routing
+     - Security headers
+
+3. build.sh
+   Purpose: Render build script
+   Location: Project root
+   Content:
+     - Install Python dependencies
+     - Install Playwright browsers
+     - Setup required system deps
+
+4. Procfile
+   Purpose: Alternative process definition (Heroku-style)
+   Location: Project root
+   Content:
+     - web: gunicorn backend.main:app ...
+
+5. requirements.txt
+   Purpose: Python production dependencies
+   Location: Project root
+   Key Packages:
+     - fastapi==0.115.0
+     - uvicorn[standard]==0.32.0
+     - playwright==1.48.0
+     - langchain==0.3.13
+     - langgraph==0.2.59
+     - psycopg2-binary==2.9.10
+     - supabase==2.10.0
+
+6. runtime.txt
+   Purpose: Python version specification
+   Location: Project root
+   Content: python-3.11.11
+
+
+ENVIRONMENT VARIABLES SUMMARY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+BACKEND (Render):
+  [Application]
+  - APP_NAME=AutoAgentHire
+  - APP_ENV=production
+  - DEBUG=false
+  - SECRET_KEY=<32-char-random-string>
+  
+  [Database]
+  - DATABASE_URL=postgresql://user:pass@host:5432/db
+  - SUPABASE_URL=https://xxxx.supabase.co
+  - SUPABASE_KEY=<supabase-anon-key>
+  
+  [AI Services]
+  - OPENAI_API_KEY=sk-...
+  - GEMINI_API_KEY=...
+  
+  [LinkedIn]
+  - LINKEDIN_EMAIL=your@email.com
+  - LINKEDIN_PASSWORD=your_password
+  
+  [CORS]
+  - CORS_ORIGINS=https://yourapp.vercel.app
+  
+  [Playwright]
+  - PLAYWRIGHT_BROWSERS_PATH=/opt/render/project/.cache/ms-playwright
+  - PLAYWRIGHT_HEADLESS=true
+
+FRONTEND (Vercel):
+  - VITE_API_URL=https://your-backend.onrender.com
+  - VITE_GOOGLE_CLIENT_ID=<google-oauth-client-id>
+
+
+================================================================================
+                        SECURITY CONSIDERATIONS
+================================================================================
+
+AUTHENTICATION & AUTHORIZATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. JWT Tokens
+   - Algorithm: HS256
+   - Expiry: 30 minutes (access), 7 days (refresh)
+   - Storage: Frontend localStorage
+   - Transmission: Authorization: Bearer <token>
+
+2. Password Security
+   - Hashing: bcrypt with automatic salting
+   - Minimum length: 8 characters
+   - Strength validation: Required
+
+3. LinkedIn Credentials
+   - Encryption: Required for storage
+   - Never logged or exposed in responses
+   - Stored in separate credentials table
+
+DATA PROTECTION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. HTTPS Only
+   - All API calls encrypted in transit
+   - Render provides automatic SSL
+   - Vercel enforces HTTPS
+
+2. CORS Configuration
+   - Whitelist only Vercel frontend domain
+   - No wildcard origins in production
+   - Credentials enabled for cookie-based auth
+
+3. Input Validation
+   - Pydantic models for all endpoints
+   - File upload size limits (10 MB)
+   - File type restrictions (PDF, DOCX only)
+   - SQL injection prevention (SQLAlchemy ORM)
+
+4. Rate Limiting
+   - LinkedIn: Max applications per day
+   - API: Rate limiting per user
+   - Anti-bot delays in automation
+
+ANTI-DETECTION MEASURES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. Human-like Behavior
+   - Random typing speeds
+   - Mouse movement simulation
+   - Random delays between actions
+   - Viewport randomization
+
+2. Browser Fingerprinting
+   - Custom user agents
+   - Disable automation flags
+   - WebDriver detection evasion
+   - Canvas fingerprint randomization
+
+
+================================================================================
+                        SCALING & PERFORMANCE
+================================================================================
+
+CURRENT LIMITATIONS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+- Single Render instance (no horizontal scaling yet)
+- Playwright browser = memory intensive
+- Synchronous automation (one user at a time)
+- FAISS vector store in-memory (no persistence)
+
+OPTIMIZATION STRATEGIES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. Database
+   - Connection pooling (SQLAlchemy)
+   - Query optimization (indexes on email, url)
+   - Lazy loading relationships
+
+2. Caching
+   - Job listing cache (reduce scraping)
+   - User profile cache (Redis future)
+   - LLM response cache (reduce API calls)
+
+3. Background Tasks
+   - Async automation execution
+   - Task queue for multiple users (Celery future)
+   - Progress tracking via polling
+
+4. API Response Compression
+   - GZip middleware enabled
+   - Reduces bandwidth 60-80%
+
+FUTURE SCALABILITY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. Load Balancing
+   - Multiple Render instances
+   - Nginx reverse proxy
+   - Session affinity
+
+2. Task Queue
+   - Celery + Redis
+   - Distributed automation workers
+   - Priority queues
+
+3. Vector Database
+   - Migrate FAISS to Pinecone
+   - Persistent storage
+   - Scalable similarity search
+
+4. Microservices Split
+   - Automation service (separate)
+   - LLM service (separate)
+   - API gateway pattern
+
+
+================================================================================
+                        MONITORING & LOGGING
+================================================================================
+
+LOGGING
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Levels: DEBUG, INFO, WARNING, ERROR, CRITICAL
+File: data/logs/app.log
+Rotation: 10 MB per file, 30 days retention
+
+Logged Events:
+  - API requests and responses
+  - Authentication attempts
+  - Automation sessions (start, progress, complete)
+  - Browser interactions
+  - LLM API calls
+  - Database queries (slow queries)
+  - Errors and exceptions
+
+METRICS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+- API response times
+- Database query times
+- Automation success rate
+- LLM API costs
+- User signup rate
+- Daily active users
+- Jobs applied per day
+
+ERROR TRACKING
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+- Application errors stored in applications.error_message
+- Frontend error boundary
+- Sentry integration (optional, via SENTRY_DSN)
+
+
+================================================================================
+                        COST ANALYSIS
+================================================================================
+
+MONTHLY COST ESTIMATE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+HOSTING:
+  - Vercel (Frontend): $0 (Hobby plan) or $20/month (Pro)
+  - Render (Backend): $25/month (Standard instance recommended)
+  - Supabase (Database): $0 (Free tier) or $25/month (Pro)
+  
+  TOTAL HOSTING: $25-$70/month
+
+AI SERVICES:
+  - OpenAI API:
+    * Embeddings: $0.00002 per 1K tokens
+    * GPT-4 Turbo: $0.01 per 1K tokens (input)
+    * Estimated: $10-$50/month (depends on usage)
+  
+  - Google Gemini:
+    * Gemini Pro: Free tier available
+    * 60 requests per minute free
+    * Estimated: $0-$20/month
+  
+  TOTAL AI: $10-$70/month
+
+GRAND TOTAL: $35-$140/month
+
+FREE TIER OPTION: ~$10/month (Vercel free + Render $25 + Supabase free + Gemini free)
+
+
+================================================================================
+                        TESTING & QUALITY ASSURANCE
+================================================================================
+
+TEST FILES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Location: scripts/
+
+1. smoke_check.py
+   - Basic API health checks
+   - Database connectivity
+   - Environment variable validation
+
+2. smoke_login.py
+   - LinkedIn authentication test
+   - Browser launch test
+   - Login flow verification
+
+3. validate_structure.py
+   - Project structure validation
+   - Required files check
+   - Dependencies verification
+
+4. setup_checker.py
+   - Deployment readiness check
+   - Configuration validation
+   - API endpoint tests
+
+DRY RUN MODE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Purpose: Test automation without submitting applications
+Usage: Set dry_run=true in automation request
+Behavior:
+  - Completes full workflow
+  - Fills all forms
+  - Stops before final submission
+  - Marks as "test_success"
+  - Provides full report
+
+
+================================================================================
+                        TROUBLESHOOTING GUIDE
+================================================================================
+
+COMMON ISSUES & SOLUTIONS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Issue: Vercel 500 MB Lambda size limit error
+Solution:
+  - Ensure vercel.json exists in repo root
+  - Verify .vercelignore excludes backend/
+  - Check that vercel.json only builds frontend/lovable
+  - Backend should NEVER be deployed to Vercel
+
+Issue: Playwright browser not found on Render
+Solution:
+  - Verify build.sh runs: playwright install chromium
+  - Check PLAYWRIGHT_BROWSERS_PATH in env vars
+  - Ensure Render plan supports required memory
+
+Issue: CORS errors in production
+Solution:
+  - Add Vercel frontend URL to CORS_ORIGINS env var
+  - Format: https://yourapp.vercel.app (no trailing slash)
+  - Restart Render service after env var change
+
+Issue: Database connection refused
+Solution:
+  - Verify DATABASE_URL format: postgresql://user:pass@host:5432/db
+  - Check Supabase dashboard for correct credentials
+  - Test connection from Render shell
+
+Issue: LinkedIn login fails
+Solution:
+  - Verify LINKEDIN_EMAIL and LINKEDIN_PASSWORD
+  - Check if 2FA is enabled (requires manual intervention)
+  - Review browser screenshots for captcha
+  - Reduce automation frequency (anti-bot)
+
+Issue: OpenAI API rate limit
+Solution:
+  - Implement exponential backoff
+  - Cache LLM responses
+  - Switch to Gemini (higher free tier)
+  - Upgrade OpenAI tier
+
+Issue: Application submission fails
+Solution:
+  - Enable dry_run mode first to test
+  - Check for form changes on LinkedIn
+  - Review error logs in applications table
+  - Verify resume file upload works
+
+
+================================================================================
+                        FUTURE ENHANCEMENTS
+================================================================================
+
+PLANNED FEATURES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. Multi-Platform Support
+   - Indeed automation
+   - Glassdoor integration
+   - ZipRecruiter support
+
+2. Advanced AI Features
+   - Interview preparation assistant
+   - Salary negotiation advisor
+   - Company research automation
+   - Email template generation
+
+3. Analytics Dashboard
+   - Application success rate tracking
+   - Interview conversion metrics
+   - A/B testing cover letters
+   - Optimal application timing
+
+4. Mobile App
+   - React Native frontend
+   - Push notifications
+   - On-the-go monitoring
+
+5. Team Features
+   - Multi-user support
+   - Recruiter mode
+   - Bulk candidate management
+
+6. Premium Features
+   - Priority automation queue
+   - Unlimited applications
+   - Advanced AI models (GPT-4.5)
+   - Dedicated support
+
+
+================================================================================
+                        ARCHITECTURE SUMMARY
+================================================================================
+
+TECHNOLOGY STACK OVERVIEW
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Frontend:
+  ✓ React 18+ (UI library)
+  ✓ TypeScript (Type safety)
+  ✓ Vite (Build tool)
+  ✓ TailwindCSS (Styling)
+  ✓ Shadcn UI (Components)
+  ✓ React Query (State management)
+  ✓ Axios (HTTP client)
+
+Backend:
+  ✓ FastAPI (Web framework)
+  ✓ Python 3.11 (Language)
+  ✓ Uvicorn + Gunicorn (ASGI server)
+  ✓ Pydantic (Validation)
+  ✓ SQLAlchemy (ORM)
+  ✓ Alembic (Migrations)
+
+Automation:
+  ✓ Playwright (Browser automation)
+  ✓ Chromium (Headless browser)
+  ✓ BeautifulSoup (HTML parsing)
+
+AI/ML:
+  ✓ LangChain (LLM framework)
+  ✓ LangGraph (Agent orchestration)
+  ✓ OpenAI GPT-4 (LLM)
+  ✓ Google Gemini (Alternative LLM)
+  ✓ FAISS (Vector search)
+
+Database:
+  ✓ PostgreSQL (Primary database)
+  ✓ Supabase (Managed Postgres)
+  ✓ FAISS (Vector store)
+
+Deployment:
+  ✓ Vercel (Frontend hosting)
+  ✓ Render (Backend hosting)
+  ✓ GitHub (Version control)
+  ✓ Supabase (Database hosting)
+
+SYSTEM CHARACTERISTICS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+- Architecture Pattern: Microservices (Frontend/Backend separation)
+- Communication Protocol: REST API (JSON over HTTPS)
+- Authentication: JWT-based
+- Database: Relational (PostgreSQL)
+- AI Integration: LangChain + LangGraph orchestration
+- Automation: Browser-based (Playwright)
+- Deployment: Multi-cloud (Vercel + Render)
+- Scaling: Horizontal (future)
+
+
+================================================================================
+                        CONTACT & SUPPORT
+================================================================================
+
+PROJECT REPOSITORY:
+  https://github.com/Sathwik11-hub/LinkedIn-Job-Automation-with-AI
+
+DOCUMENTATION:
+  - README.md: Quick start guide
+  - SYSTEM_ARCHITECTURE.txt: This file (comprehensive documentation)
+  - API Docs: https://your-backend.onrender.com/docs (Swagger UI)
+
+DEPLOYMENT PLATFORMS:
+  - Frontend: https://vercel.com
+  - Backend: https://render.com
+  - Database: https://supabase.com
+
+SUPPORT:
+  - GitHub Issues: For bug reports and feature requests
+  - Documentation: Check README.md and API docs first
+  - Community: Join discussions on GitHub
+
+================================================================================
+                        END OF DOCUMENT
+================================================================================
+Last Updated: February 26, 2026
+Version: 1.0.0
+Maintained by: AutoAgentHire Team
