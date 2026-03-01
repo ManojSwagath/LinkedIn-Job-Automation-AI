@@ -34,7 +34,7 @@ beautifulsoup4==4.12.3
 lxml==5.3.0
 
 # API & HTTP
-httpx==0.28.1
+httpx<0.28,>=0.26
 aiohttp==3.11.11
 requests==2.32.3
 
