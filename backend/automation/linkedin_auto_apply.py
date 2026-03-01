@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass, asdict
 
-import PyPDF2
+from pypdf import PdfReader
 from playwright.async_api import async_playwright, Page, Browser, BrowserContext
 from dotenv import load_dotenv
 
@@ -174,7 +174,7 @@ class LinkedInAutoApply:
         """Extract text from PDF resume."""
         try:
             with open(self.resume_path, 'rb') as file:
-                pdf_reader = PyPDF2.PdfReader(file)
+                pdf_reader = PdfReader(file)
                 text = ""
                 for page in pdf_reader.pages:
                     text += page.extract_text()

@@ -10,11 +10,11 @@ logger = logging.getLogger(__name__)
 
 # Try to import optional dependencies
 try:
-    import PyPDF2
+    from pypdf import PdfReader
     PDF_AVAILABLE = True
 except ImportError:
     PDF_AVAILABLE = False
-    logger.warning("PyPDF2 not installed - PDF parsing disabled")
+    logger.warning("pypdf not installed - PDF parsing disabled")
 
 try:
     from docx import Document
@@ -69,13 +69,13 @@ class ResumeParser:
     def _extract_from_pdf(self, file_path: str) -> str:
         """Extract text from PDF file."""
         if not PDF_AVAILABLE:
-            return "PDF parsing not available - PyPDF2 not installed"
+            return "PDF parsing not available - pypdf not installed"
         
         try:
-            import PyPDF2  # Import here to avoid unbound warning
+            from pypdf import PdfReader
             text = []
             with open(file_path, 'rb') as file:
-                pdf_reader = PyPDF2.PdfReader(file)
+                pdf_reader = PdfReader(file)
                 for page in pdf_reader.pages:
                     page_text = page.extract_text()
                     if page_text:
